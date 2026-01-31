@@ -62,7 +62,7 @@ LINKS_FILE = "roblox_links.json"
 # Example:
 # BANNER_URL = "https://cdn.discordapp.com/attachments/.../banner.png"
 # ======================
-BANNER_URL = ""  # <-- PASTE YOUR BANNER IMAGE URL HERE (or leave blank)
+BANNER_URL = "https://YOUR-DIRECT-IMAGE-LINK.png"
 
 # Styling
 EMBED_COLOR = discord.Color.from_str("#181818")
@@ -191,7 +191,6 @@ def build_verification_embeds():
         e.set_footer(
             text="Remember that these rules are general guidelines, and specific communities may have additional or more specific rules tailored to their needs."
         )
-        apply_banner(e)
 
     return [embed_a, embed_b, embed_c]
 
@@ -304,7 +303,7 @@ async def say(ctx, *, message: str):
     desc = "\n".join(fields["desc"]) if fields["desc"] else None
     author = "\n".join(fields["author"]) if fields["author"] else None
     footer = "\n".join(fields["footer"]) if fields["footer"] else None
-    banner = fields["banner"]
+    banner = fields["banner"].strip() if fields["banner"] else None
 
     if not title and not desc:
         return await ctx.send(
@@ -322,10 +321,13 @@ async def say(ctx, *, message: str):
         embed.set_author(name=author)
     if footer:
         embed.set_footer(text=footer)
-    if banner:
-        embed.set_image(url=banner)
-
+    # Send the embed first (no banner inside it)
     await ctx.send(embed=embed)
+
+    # Then send the banner as a separate message (outside the embed)
+    if banner:
+        await ctx.send(banner)
+
 
 
 @say.error
@@ -380,7 +382,13 @@ async def setupverify(ctx):
 
     embeds = build_verification_embeds()
     await channel.send(embeds=embeds)
+
+    # Send banner as a separate message (outside the embed)
+    if BANNER_URL:
+        await channel.send(BANNER_URL)
+
     await ctx.send("✅ Verification message posted.", delete_after=3)
+
 
 
 @setupverify.error
@@ -428,6 +436,7 @@ async def on_ready():
 
 
 bot.run(TOKEN)
+
 
 
 
