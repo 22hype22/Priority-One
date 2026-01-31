@@ -421,6 +421,29 @@ async def postverify_error(ctx, error):
     else:
         await ctx.reply("❌ Usage: `!postverify` or `!postverify <channel_id>`", mention_author=False)
 
+@bot.command()
+@commands.has_permissions(administrator=True)
+async def banner(ctx, url: str):
+    """
+    Admin-only: posts an image link by itself (not an embed).
+    Usage:
+      !banner https://.../image.png
+    """
+    try:
+        await ctx.message.delete()
+    except discord.Forbidden:
+        pass  # bot doesn't have permission to delete messages
+
+    await ctx.send(url)
+
+
+@banner.error
+async def banner_error(ctx, error):
+    if isinstance(error, commands.MissingPermissions):
+        await ctx.reply("You don’t have permission to use that.", mention_author=False)
+    else:
+        await ctx.reply("❌ Usage: `!banner <direct image url>`", mention_author=False)
+
 
 # ======================
 # STARTUP
@@ -436,6 +459,7 @@ async def on_ready():
 
 if __name__ == "__main__":
     bot.run(TOKEN)
+
 
 
 
