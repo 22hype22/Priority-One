@@ -305,12 +305,12 @@ async def say(ctx, *, message: str):
     footer = "\n".join(fields["footer"]) if fields["footer"] else None
     banner = fields["banner"].strip() if fields["banner"] else None
 
-    if not title and not desc:
-        return await ctx.send(
-            "❌ You must include at least a title or desc.",
-            delete_after=8
-        )
+    # CASE 1: Banner ONLY → send image as normal message
+    if banner and not title and not desc:
+        await ctx.send(banner)
+        return
 
+    # CASE 2: Embed exists
     embed = discord.Embed(
         title=title if title else discord.Embed.Empty,
         description=desc if desc else discord.Embed.Empty,
@@ -321,13 +321,12 @@ async def say(ctx, *, message: str):
         embed.set_author(name=author)
     if footer:
         embed.set_footer(text=footer)
-    # Send the embed first (no banner inside it)
+
     await ctx.send(embed=embed)
 
-    # Then send the banner as a separate message (outside the embed)
+    # If banner exists, send it OUTSIDE the embed
     if banner:
         await ctx.send(banner)
-
 
 
 @say.error
@@ -436,6 +435,7 @@ async def on_ready():
 
 
 bot.run(TOKEN)
+
 
 
 
