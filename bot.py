@@ -22,7 +22,7 @@ TOKEN = os.getenv("DISCORD_TOKEN")
 VERIFY_CHANNEL_ID = 1091587135741624352  # channel id
 
 # Roblox group
-ROBLOX_GROUP_ID = 203264927
+ROBLOX_GROUP_ID = 234565642
 
 # Roblox role name -> Discord role IDs (can be more than one role)
 ROBLOX_TO_DISCORD_ROLE = {
@@ -421,6 +421,7 @@ async def postverify_error(ctx, error):
     else:
         await ctx.reply("❌ Usage: `!postverify` or `!postverify <channel_id>`", mention_author=False)
 
+
 @bot.command()
 @commands.has_permissions(administrator=True)
 async def banner(ctx, url: str):
@@ -459,11 +460,4 @@ async def on_ready():
 
 if __name__ == "__main__":
     bot.run(TOKEN)
-
-
-
-
-
-
-
 
