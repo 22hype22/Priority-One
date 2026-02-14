@@ -225,20 +225,35 @@ async def update(ctx):
     if role_name is None:
         return await ctx.reply("❌ I can’t find you in the Roblox group. Join the group, then try again.", mention_author=False)
 
-    # Nickname sync
-    roblox_name = await roblox_userid_to_username(link_data["roblox_user_id"])
-    if not roblox_name:
-        return await ctx.reply("❌ Could not fetch your Roblox username.", mention_author=False)
+    role_name_lower = role_name.lower()
+
+    # ===== GIVE ROLES =====
+    if role_name_lower not in ROBLOX_TO_DISCORD_ROLE:
+        return await ctx.reply(f"⚠️ Rank **{role_name}** has no role setup yet.", mention_author=False)
+
+    role_ids = ROBLOX_TO_DISCORD_ROLE[role_name_lower]
+
+    roles_to_add = []
+    for rid in role_ids:
+        role = ctx.guild.get_role(rid)
+        if role:
+            roles_to_add.append(role)
 
     try:
-        await ctx.author.edit(nick=roblox_name, reason="Roblox nickname sync")
+        await ctx.author.add_roles(*roles_to_add, reason="Roblox role sync")
     except discord.Forbidden:
-        return await ctx.reply(
-            "❌ I can’t change your nickname. Give me **Manage Nicknames** and make sure my bot role is above yours.",
-            mention_author=False
-        )
+        return await ctx.reply("❌ Bot can't give roles. Move bot role ABOVE other roles.", mention_author=False)
 
-    await ctx.reply(f"✅ Nickname updated to **{roblox_name}** (Roblox rank: **{role_name}**).", mention_author=False)
+    # ===== NICKNAME =====
+    roblox_name = await roblox_userid_to_username(link_data["roblox_user_id"])
+    if roblox_name:
+        try:
+            await ctx.author.edit(nick=roblox_name)
+        except:
+            pass
+
+    await ctx.reply(f"✅ Roles synced for **{role_name}**.", mention_author=False)
+
 
 
 # ======================
