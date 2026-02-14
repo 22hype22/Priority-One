@@ -180,7 +180,7 @@ def build_verification_embeds():
             "*Please join our group and invite others!*\n\n"
             "**Group & Discord**\n"
             "━━━━━━━━━━━━━━━━━━━━━━\n"
-            "https://www.roblox.com/communities/203264927\n"
+            "https://www.roblox.com/communities/234565642\n"
             "https://discord.gg/hWYAE5ESGa"
         ),
         color=EMBED_COLOR
@@ -460,4 +460,3 @@ async def on_ready():
 
 if __name__ == "__main__":
     bot.run(TOKEN)
-
