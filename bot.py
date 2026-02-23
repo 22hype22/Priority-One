@@ -190,7 +190,7 @@ async def update(ctx):
 @bot.command()
 @commands.has_permissions(administrator=True)
 async def say(ctx, *, message: str):
-    fields = {"author": [], "title": [], "desc": [], "footer": [], "banner": None}
+    fields = {"author": [], "title": [], "desc": [], "footer": []}
     current_key = None
 
     for raw_line in message.splitlines():
@@ -215,9 +215,6 @@ async def say(ctx, *, message: str):
             elif key in ("footer", "f"):
                 current_key = "footer"
                 fields[current_key] = [value]
-            elif key in ("banner", "image", "img", "b"):
-                fields["banner"] = value.strip()
-                current_key = None
             else:
                 current_key = None
 
@@ -228,9 +225,7 @@ async def say(ctx, *, message: str):
     desc = "\n".join(fields["desc"]) if fields["desc"] else None
     author = "\n".join(fields["author"]) if fields["author"] else None
     footer = "\n".join(fields["footer"]) if fields["footer"] else None
-    banner = fields["banner"]
 
-    # Always create embed
     embed = discord.Embed(
         title=title if title else discord.Embed.Empty,
         description=desc if desc else discord.Embed.Empty,
@@ -244,15 +239,11 @@ async def say(ctx, *, message: str):
     attachment = ctx.message.attachments[0] if ctx.message.attachments else None
 
     try:
-        # Send embed first
+        # Send embed FIRST
         await ctx.send(embed=embed)
 
-        # If banner link provided, send it (preview size depends on Discord)
-        if banner:
-            await ctx.send(banner)
-
-        # If file attached, re-upload it as a normal attachment (FULL WIDTH)
-        elif attachment:
+        # Then send banner as a normal attachment message (NOT embed)
+        if attachment:
             file = await attachment.to_file()
             await ctx.send(file=file)
 
@@ -262,9 +253,7 @@ async def say(ctx, *, message: str):
         traceback.print_exc()
         await ctx.send(f"❌ Failed: `{type(e).__name__}: {str(e)[:180]}`")
 
-    # IMPORTANT:
-    # If there's an attachment, do NOT delete the command message,
-    # or Discord can 404 the asset ("asset not found").
+    # Don't delete if attachment exists (prevents Discord 404 asset issues)
     if not attachment:
         try:
             await ctx.message.delete()
