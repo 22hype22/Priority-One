@@ -189,6 +189,7 @@ async def update(ctx):
 async def say(ctx, *, message: str):
     """
     Admin-only embed builder.
+
     Usage example:
 
     !say
@@ -243,7 +244,6 @@ async def say(ctx, *, message: str):
     footer = "\n".join(fields["footer"]) if fields["footer"] else None
     banner = fields["banner"]
 
-    # Always create an embed so attachment banners work even if you only typed desc/title.
     embed = discord.Embed(
         title=title if title else discord.Embed.Empty,
         description=desc if desc else discord.Embed.Empty,
@@ -257,12 +257,12 @@ async def say(ctx, *, message: str):
     attachment = ctx.message.attachments[0] if ctx.message.attachments else None
 
     try:
-        # Case 1: user provided banner link (send embed, then link)
+        # Case 1: banner link provided
         if banner:
             await ctx.send(embed=embed)
             await ctx.send(banner)
 
-        # Case 2: user attached an image (embed it as banner)
+        # Case 2: attachment provided -> embed it as banner
         elif attachment:
             file = await attachment.to_file()
             embed.set_image(url=f"attachment://{file.filename}")
@@ -278,11 +278,13 @@ async def say(ctx, *, message: str):
         traceback.print_exc()
         await ctx.send(f"❌ Banner failed: `{type(e).__name__}: {str(e)[:180]}`")
 
-    # Delete the command message AFTER sending (prevents attachment issues)
-    try:
-        await ctx.message.delete()
-    except discord.Forbidden:
-        pass
+    # IMPORTANT: If there's an attachment, do NOT delete the command message,
+    # or Discord can 404 the asset ("asset not found").
+    if not attachment:
+        try:
+            await ctx.message.delete()
+        except discord.Forbidden:
+            pass
 
 
 @say.error
