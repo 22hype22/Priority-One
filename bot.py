@@ -8,6 +8,7 @@ from discord.ext import commands
 import aiohttp
 import json
 import os
+import traceback
 
 # ======================
 # CONFIG (EDIT THESE)
@@ -289,9 +290,13 @@ async def say(ctx, *, message: str):
             await ctx.send(embed=embed, file=file)
         except discord.Forbidden:
             await ctx.send("❌ I need **Attach Files** permission to send the banner image.")
+	import traceback  # put this at the TOP of your file with other imports
+
+	...
+
 	except Exception as e:
-    	    print("SAY COMMAND ERROR:", repr(e))
-    	    await ctx.send(f"❌ Banner failed: `{type(e).__name__}: {str(e)[:180]}`")
+            traceback.print_exc()  # full error in Railway logs
+            await ctx.send(f"❌ Banner failed: `{type(e).__name__}: {str(e)[:180]}`", mention_author=False)
 
 
 @say.error
