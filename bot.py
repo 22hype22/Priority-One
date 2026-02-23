@@ -276,23 +276,21 @@ async def say(ctx, *, message: str):
     except discord.Forbidden:
         pass
 
-    if embed:
-        await ctx.send(embed=embed)
-
     # If banner link used
     if banner:
         await ctx.send(banner)
         return
 
-    # If image attached, use as banner automatically
-    if attachment:
+    # If image attached, put it INSIDE the embed
+    if attachment and embed:
         try:
             file = await attachment.to_file()
-            await ctx.send(file=file)
+            embed.set_image(url=f"attachment://{file.filename}")
+            await ctx.send(embed=embed, file=file)
         except discord.Forbidden:
             await ctx.send("❌ I need **Attach Files** permission to send the banner image.")
-        except Exception:
-            await ctx.send("❌ Banner failed to send. Check Railway logs for the error.")
+        except Exception as e:
+            await ctx.send("❌ Banner failed. Check Railway logs.")
 
 
 @say.error
