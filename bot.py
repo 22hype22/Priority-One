@@ -183,27 +183,13 @@ async def update(ctx):
 
 # ======================
 # ADMIN: SAY (EMBED BUILDER)
+# - If you ATTACH an image, bot re-uploads it as a normal file message
+#   so it appears FULL-WIDTH and OUTSIDE the embed (your goal).
+# - If you use banner=<link>, bot sends the link after the embed.
 # ======================
 @bot.command()
 @commands.has_permissions(administrator=True)
 async def say(ctx, *, message: str):
-    """
-    Admin-only embed builder.
-
-    Usage example:
-
-    !say
-    author=PO Announcements
-    title=Update
-    desc=Hello
-      This is a second line
-    footer=Footer text
-
-    Banner options:
-    - banner=<image link>  (sends link as separate message)
-    - OR attach an image to the command message (it will be embedded as the banner)
-    """
-
     fields = {"author": [], "title": [], "desc": [], "footer": [], "banner": None}
     current_key = None
 
@@ -244,6 +230,7 @@ async def say(ctx, *, message: str):
     footer = "\n".join(fields["footer"]) if fields["footer"] else None
     banner = fields["banner"]
 
+    # Always create embed
     embed = discord.Embed(
         title=title if title else discord.Embed.Empty,
         description=desc if desc else discord.Embed.Empty,
@@ -257,28 +244,26 @@ async def say(ctx, *, message: str):
     attachment = ctx.message.attachments[0] if ctx.message.attachments else None
 
     try:
-        # Case 1: banner link provided
+        # Send embed first
+        await ctx.send(embed=embed)
+
+        # If banner link provided, send it (preview size depends on Discord)
         if banner:
-            await ctx.send(embed=embed)
             await ctx.send(banner)
 
-        # Case 2: attachment provided -> embed it as banner
+        # If file attached, re-upload it as a normal attachment (FULL WIDTH)
         elif attachment:
             file = await attachment.to_file()
-            embed.set_image(url=f"attachment://{file.filename}")
-            await ctx.send(embed=embed, file=file)
-
-        # Case 3: just an embed
-        else:
-            await ctx.send(embed=embed)
+            await ctx.send(file=file)
 
     except discord.Forbidden:
         await ctx.send("❌ I need **Send Messages**, **Embed Links**, and **Attach Files** permissions here.")
     except Exception as e:
         traceback.print_exc()
-        await ctx.send(f"❌ Banner failed: `{type(e).__name__}: {str(e)[:180]}`")
+        await ctx.send(f"❌ Failed: `{type(e).__name__}: {str(e)[:180]}`")
 
-    # IMPORTANT: If there's an attachment, do NOT delete the command message,
+    # IMPORTANT:
+    # If there's an attachment, do NOT delete the command message,
     # or Discord can 404 the asset ("asset not found").
     if not attachment:
         try:
