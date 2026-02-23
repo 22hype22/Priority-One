@@ -15,11 +15,7 @@ import os
 
 # IMPORTANT: Do NOT leave your real token in code if you share screenshots.
 # If you already posted your token anywhere, reset it in the Discord Developer Portal.
-import os
 TOKEN = os.getenv("DISCORD_TOKEN")
-
-# Where you want the verification embeds to be posted by !setupverify
-VERIFY_CHANNEL_ID = 1091587135741624352  # channel id
 
 # Roblox group
 ROBLOX_GROUP_ID = 234565642
@@ -290,13 +286,13 @@ async def say(ctx, *, message: str):
 
     # If image attached, use as banner automatically
     if attachment:
-    	try:
-        	file = await attachment.to_file()
-        	await ctx.send(file=file)
-    	except discord.Forbidden:
-        	await ctx.send("❌ I need **Attach Files** permission to send the banner image.")
-    	except Exception as e:
-        	await ctx.send("❌ Banner failed to send. Check Railway logs for the error.")
+        try:
+            file = await attachment.to_file()
+            await ctx.send(file=file)
+        except discord.Forbidden:
+            await ctx.send("❌ I need **Attach Files** permission to send the banner image.")
+        except Exception:
+            await ctx.send("❌ Banner failed to send. Check Railway logs for the error.")
 
 
 @say.error
@@ -333,37 +329,6 @@ async def announce(ctx, *, text: str):
 async def announce_error(ctx, error):
     if isinstance(error, commands.MissingPermissions):
         await ctx.reply("You don’t have permission to use that.", mention_author=False)
-
-
-# ======================
-# ADMIN: POST VERIFICATION EMBEDS
-# ======================
-@bot.command()
-@commands.has_permissions(administrator=True)
-async def setupverify(ctx):
-    """Admin-only: posts verification embeds to VERIFY_CHANNEL_ID."""
-    await ctx.message.delete()
-
-    channel = bot.get_channel(VERIFY_CHANNEL_ID)
-    if channel is None:
-        return await ctx.send("VERIFY_CHANNEL_ID is wrong or I can’t see that channel.")
-
-    embeds = build_verification_embeds()
-    await channel.send(embeds=embeds)
-
-    # Send banner as a separate message (outside the embed)
-    if BANNER_URL:
-        await channel.send(BANNER_URL)
-
-    await ctx.send("✅ Verification message posted.", delete_after=3)
-
-@banner.error
-async def banner_error(ctx, error):
-    if isinstance(error, commands.MissingPermissions):
-        await ctx.reply("You don’t have permission to use that.", mention_author=False)
-    else:
-        await ctx.reply("❌ Usage: `!banner <direct image url>`", mention_author=False)
-
 
 # ======================
 # STARTUP
