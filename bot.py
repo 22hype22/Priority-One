@@ -289,8 +289,9 @@ async def say(ctx, *, message: str):
             await ctx.send(embed=embed, file=file)
         except discord.Forbidden:
             await ctx.send("❌ I need **Attach Files** permission to send the banner image.")
-        except Exception as e:
-            await ctx.send("❌ Banner failed. Check Railway logs.")
+	except Exception as e:
+    	    print("SAY COMMAND ERROR:", repr(e))
+    	    await ctx.send(f"❌ Banner failed: `{type(e).__name__}: {str(e)[:180]}`")
 
 
 @say.error
