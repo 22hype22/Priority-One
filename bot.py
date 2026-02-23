@@ -110,9 +110,19 @@ async def say(ctx, *, message: str):
     fields = {"author": [], "title": [], "desc": [], "footer": []}
     current_key = None
 
-    # grab attachment BEFORE deleting message
+    # 1) Grab the attachment BEFORE deleting the message (download into memory)
     attachment = ctx.message.attachments[0] if ctx.message.attachments else None
+    saved_file = None
+    if attachment:
+        try:
+            saved_file = await attachment.to_file()  # download now
+        except discord.Forbidden:
+            return await ctx.reply("❌ I need **Attach Files** permission to re-upload the image.", mention_author=False)
+        except Exception as e:
+            traceback.print_exc()
+            return await ctx.reply(f"❌ Failed to read attachment: `{type(e).__name__}: {str(e)[:180]}`", mention_author=False)
 
+    # 2) Parse your key=value lines
     for raw_line in message.splitlines():
         line = raw_line.rstrip()
         if not line.strip():
@@ -156,21 +166,21 @@ async def say(ctx, *, message: str):
     if footer:
         embed.set_footer(text=footer)
 
+    # 3) Delete YOUR message first (now safe because we already downloaded the file)
     try:
-        # delete your message FIRST
         await ctx.message.delete()
+    except discord.Forbidden:
+        return await ctx.reply("❌ I need **Manage Messages** permission to delete your command.", mention_author=False)
 
-        # send embed
+    # 4) Post BOT messages
+    try:
         await ctx.send(embed=embed)
-
-        # send banner FULL WIDTH outside embed
-        if attachment:
-            file = await attachment.to_file()
-            await ctx.send(file=file)
-
+        if saved_file:
+            # sends full-width image OUTSIDE the embed
+            await ctx.send(file=saved_file)
     except Exception as e:
         traceback.print_exc()
-        await ctx.send(f"❌ Error: {e}")
+        await ctx.send(f"❌ Failed to post: `{type(e).__name__}: {str(e)[:180]}`")
 
 @say.error
 async def say_error(ctx, error):
