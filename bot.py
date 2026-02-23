@@ -2,6 +2,7 @@
 # DISCORD BOT (FULL FILE)
 # ======================
 
+import io
 import discord
 from discord.ext import commands
 import aiohttp
@@ -110,19 +111,29 @@ async def say(ctx, *, message: str):
     fields = {"author": [], "title": [], "desc": [], "footer": []}
     current_key = None
 
-    # 1) Grab the attachment BEFORE deleting the message (download into memory)
     attachment = ctx.message.attachments[0] if ctx.message.attachments else None
     saved_file = None
+
+    # 1) Fetch attachment bytes via URL BEFORE deleting the message
     if attachment:
         try:
-            saved_file = await attachment.to_file()  # download now
-        except discord.Forbidden:
-            return await ctx.reply("❌ I need **Attach Files** permission to re-upload the image.", mention_author=False)
+            async with aiohttp.ClientSession() as session:
+                async with session.get(attachment.url) as resp:
+                    if resp.status != 200:
+                        return await ctx.reply(
+                            f"❌ Can't download attachment (HTTP {resp.status}).",
+                            mention_author=False
+                        )
+                    data = await resp.read()
+            saved_file = discord.File(fp=io.BytesIO(data), filename=attachment.filename)
         except Exception as e:
             traceback.print_exc()
-            return await ctx.reply(f"❌ Failed to read attachment: `{type(e).__name__}: {str(e)[:180]}`", mention_author=False)
+            return await ctx.reply(
+                f"❌ Failed to fetch attachment: `{type(e).__name__}: {str(e)[:180]}`",
+                mention_author=False
+            )
 
-    # 2) Parse your key=value lines
+    # 2) Parse key=value lines
     for raw_line in message.splitlines():
         line = raw_line.rstrip()
         if not line.strip():
@@ -147,7 +158,6 @@ async def say(ctx, *, message: str):
                 fields[current_key] = [value]
             else:
                 current_key = None
-
         elif raw_line.startswith((" ", "\t")) and current_key:
             fields[current_key].append(raw_line.strip())
 
@@ -166,23 +176,21 @@ async def say(ctx, *, message: str):
     if footer:
         embed.set_footer(text=footer)
 
-    # 3) Delete YOUR message first (now safe because we already downloaded the file)
+    # 3) Delete your message (Manage Messages required)
     try:
         await ctx.message.delete()
     except discord.Forbidden:
-        return await ctx.reply("❌ I need **Manage Messages** permission to delete your command.", mention_author=False)
+        return await ctx.reply("❌ I need **Manage Messages** to delete your command.", mention_author=False)
 
-    # 4) Post BOT messages
+    # 4) Post bot messages
     try:
         await ctx.send(embed=embed)
         if saved_file:
-            # sends full-width image OUTSIDE the embed
-            await ctx.send(file=saved_file)
+            await ctx.send(file=saved_file)  # full-width, outside embed
     except Exception as e:
         traceback.print_exc()
-        await ctx.send(f"❌ Failed to post: `{type(e).__name__}: {str(e)[:180]}`")
+        await ctx.send(f"❌ Failed to post: `{type(e).__name__}: {str(e)[:180]}`")@say.error
 
-@say.error
 async def say_error(ctx, error):
     if isinstance(error, commands.MissingPermissions):
         await ctx.reply("You don’t have permission.", mention_author=False)
