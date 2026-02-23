@@ -8,7 +8,6 @@ from discord.ext import commands
 import aiohttp
 import json
 import os
-import io
 
 # ======================
 # CONFIG (EDIT THESE)
@@ -291,12 +290,13 @@ async def say(ctx, *, message: str):
 
     # If image attached, use as banner automatically
     if attachment:
-        async with aiohttp.ClientSession() as session:
-            async with session.get(attachment.url) as r:
-                if r.status == 200:
-                    data = await r.read()
-                    file = discord.File(fp=io.BytesIO(data), filename=attachment.filename)
-                    await ctx.send(file=file)
+    	try:
+        	file = await attachment.to_file()
+        	await ctx.send(file=file)
+    	except discord.Forbidden:
+        	await ctx.send("❌ I need **Attach Files** permission to send the banner image.")
+    	except Exception as e:
+        	await ctx.send("❌ Banner failed to send. Check Railway logs for the error.")
 
 
 @say.error
