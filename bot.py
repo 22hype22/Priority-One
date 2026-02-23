@@ -15,7 +15,6 @@ import traceback
 # ======================
 
 # IMPORTANT: Do NOT leave your real token in code if you share screenshots.
-# If you already posted your token anywhere, reset it in the Discord Developer Portal.
 TOKEN = os.getenv("DISCORD_TOKEN")
 
 # Roblox group
@@ -24,24 +23,20 @@ ROBLOX_GROUP_ID = 234565642
 # Roblox role name -> Discord role IDs (can be more than one role)
 ROBLOX_TO_DISCORD_ROLE = {
     "community member": [1091583538148679821],
-
     "vip": [
         1091583538148679821,  # community member
         1103177486658977853,  # vip
     ],
-
     "developer": [
         1091583538148679821,  # community member
         1463061109174046957,  # developer
         1091575484699119677,  # developer team
     ],
-
     "senior developer": [
         1091583538148679821,  # community member
         1463061197392969821,  # senior developer
         1091575484699119677,  # developer team
     ],
-
     "administration": [
         1103516006099468448,  # +
         1128101474073841684,  # administration
@@ -52,18 +47,11 @@ ROBLOX_TO_DISCORD_ROLE = {
 # File where linked Discord->Roblox accounts are stored
 LINKS_FILE = "roblox_links.json"
 
-# ======================
-# BANNER (PASTE YOUR URL HERE)
-# This is where you paste your banner for the end of embeds.
-# Must be a DIRECT image link (ends in .png/.jpg/.gif) or Discord CDN link.
-# Example:
-# BANNER_URL = "https://cdn.discordapp.com/attachments/.../banner.png"
-# ======================
-BANNER_URL = "https://YOUR-DIRECT-IMAGE-LINK.png"
+# Optional default banner for !announce embeds (leave "" to disable)
+BANNER_URL = ""  # e.g. "https://cdn.discordapp.com/attachments/.../banner.png"
 
 # Styling
 EMBED_COLOR = discord.Color.from_str("#181818")
-
 
 # ======================
 # INTENTS / BOT
@@ -73,7 +61,6 @@ intents.message_content = True
 intents.members = True
 
 bot = commands.Bot(command_prefix="!", intents=intents)
-
 
 # ======================
 # HELPERS
@@ -91,7 +78,6 @@ def save_links(data):
 
 
 def apply_banner(embed: discord.Embed) -> discord.Embed:
-    """Adds banner image to the bottom of the embed if BANNER_URL is set."""
     if BANNER_URL:
         embed.set_image(url=BANNER_URL)
     return embed
@@ -169,7 +155,6 @@ async def update(ctx):
 
     role_name_lower = role_name.lower()
 
-    # ===== GIVE ROLES =====
     if role_name_lower not in ROBLOX_TO_DISCORD_ROLE:
         return await ctx.reply(f"⚠️ Rank **{role_name}** has no role setup yet.", mention_author=False)
 
@@ -186,16 +171,14 @@ async def update(ctx):
     except discord.Forbidden:
         return await ctx.reply("❌ Bot can't give roles. Move bot role ABOVE other roles.", mention_author=False)
 
-    # ===== NICKNAME =====
     roblox_name = await roblox_userid_to_username(link_data["roblox_user_id"])
     if roblox_name:
         try:
             await ctx.author.edit(nick=roblox_name)
-        except:
+        except Exception:
             pass
 
     await ctx.reply(f"✅ Roles synced for **{role_name}**.", mention_author=False)
-
 
 
 # ======================
@@ -206,22 +189,24 @@ async def update(ctx):
 async def say(ctx, *, message: str):
     """
     Admin-only embed builder.
-    Supports multiline + indented continuation lines.
-    If you attach an image, it will automatically be used as banner.
+    Usage example:
+
+    !say
+    author=PO Announcements
+    title=Update
+    desc=Hello
+      This is a second line
+    footer=Footer text
+
+    Banner options:
+    - banner=<image link>  (sends link as separate message)
+    - OR attach an image to the command message (it will be embedded as the banner)
     """
 
-    fields = {
-        "author": [],
-        "title": [],
-        "desc": [],
-        "footer": [],
-        "banner": None,
-    }
-
+    fields = {"author": [], "title": [], "desc": [], "footer": [], "banner": None}
     current_key = None
-    lines = message.splitlines()
 
-    for raw_line in lines:
+    for raw_line in message.splitlines():
         line = raw_line.rstrip()
         if not line.strip():
             continue
@@ -258,51 +243,53 @@ async def say(ctx, *, message: str):
     footer = "\n".join(fields["footer"]) if fields["footer"] else None
     banner = fields["banner"]
 
-    embed = None
-    if title or desc or author or footer:
-        embed = discord.Embed(
-            title=title if title else discord.Embed.Empty,
-            description=desc if desc else discord.Embed.Empty,
-            color=discord.Color.from_str("#181818"),
-        )
-        if author:
-            embed.set_author(name=author)
-        if footer:
-            embed.set_footer(text=footer)
+    # Always create an embed so attachment banners work even if you only typed desc/title.
+    embed = discord.Embed(
+        title=title if title else discord.Embed.Empty,
+        description=desc if desc else discord.Embed.Empty,
+        color=EMBED_COLOR,
+    )
+    if author:
+        embed.set_author(name=author)
+    if footer:
+        embed.set_footer(text=footer)
 
     attachment = ctx.message.attachments[0] if ctx.message.attachments else None
 
     try:
-        await ctx.message.delete()
-    except discord.Forbidden:
-        pass
+        # Case 1: user provided banner link (send embed, then link)
+        if banner:
+            await ctx.send(embed=embed)
+            await ctx.send(banner)
 
-    # If banner link used
-    if banner:
-        await ctx.send(banner)
-        return
-
-    # If no banner and no attachment, just send the embed
-    if embed and not attachment:
-        await ctx.send(embed=embed)
-
-    # If image attached, put it INSIDE the embed
-    if attachment and embed:
-        try:
+        # Case 2: user attached an image (embed it as banner)
+        elif attachment:
             file = await attachment.to_file()
             embed.set_image(url=f"attachment://{file.filename}")
             await ctx.send(embed=embed, file=file)
-        except discord.Forbidden:
-            await ctx.send("❌ I need **Attach Files** permission to send the banner image.")
-        except Exception as e:
-            traceback.print_exc()
-            await ctx.send(f"❌ Banner failed: `{type(e).__name__}: {str(e)[:180]}`", mention_author=False)
+
+        # Case 3: just an embed
+        else:
+            await ctx.send(embed=embed)
+
+    except discord.Forbidden:
+        await ctx.send("❌ I need **Send Messages**, **Embed Links**, and **Attach Files** permissions here.")
+    except Exception as e:
+        traceback.print_exc()
+        await ctx.send(f"❌ Banner failed: `{type(e).__name__}: {str(e)[:180]}`")
+
+    # Delete the command message AFTER sending (prevents attachment issues)
+    try:
+        await ctx.message.delete()
+    except discord.Forbidden:
+        pass
 
 
 @say.error
 async def say_error(ctx, error):
     if isinstance(error, commands.MissingPermissions):
         await ctx.reply("You don’t have permission to use that.", mention_author=False)
+
 
 # ======================
 # ADMIN: ANNOUNCE (EMBED)
@@ -315,7 +302,10 @@ async def announce(ctx, *, text: str):
     Usage:
       !announce Title | message here
     """
-    await ctx.message.delete()
+    try:
+        await ctx.message.delete()
+    except discord.Forbidden:
+        pass
 
     if "|" in text:
         title, desc = [s.strip() for s in text.split("|", 1)]
@@ -334,6 +324,7 @@ async def announce_error(ctx, error):
     if isinstance(error, commands.MissingPermissions):
         await ctx.reply("You don’t have permission to use that.", mention_author=False)
 
+
 # ======================
 # STARTUP
 # ======================
@@ -347,4 +338,6 @@ async def on_ready():
 
 
 if __name__ == "__main__":
+    if not TOKEN:
+        raise RuntimeError("DISCORD_TOKEN environment variable is not set.")
     bot.run(TOKEN)
