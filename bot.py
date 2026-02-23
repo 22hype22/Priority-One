@@ -282,6 +282,10 @@ async def say(ctx, *, message: str):
         await ctx.send(banner)
         return
 
+    # If no banner and no attachment, just send the embed
+    if embed and not attachment:
+        await ctx.send(embed=embed)
+
     # If image attached, put it INSIDE the embed
     if attachment and embed:
         try:
@@ -290,12 +294,8 @@ async def say(ctx, *, message: str):
             await ctx.send(embed=embed, file=file)
         except discord.Forbidden:
             await ctx.send("❌ I need **Attach Files** permission to send the banner image.")
-	import traceback  # put this at the TOP of your file with other imports
-
-	...
-
-	except Exception as e:
-            traceback.print_exc()  # full error in Railway logs
+        except Exception as e:
+            traceback.print_exc()
             await ctx.send(f"❌ Banner failed: `{type(e).__name__}: {str(e)[:180]}`", mention_author=False)
 
 
