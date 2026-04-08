@@ -1,1 +1,5 @@
 discord.py
+aiohttp
+spotipy
+yt-dlp
+PyNaCl
