@@ -918,8 +918,15 @@ async def on_ready():
     try:
         guild = discord.Object(id=1091573463979925576)
         print(f"Commands in tree: {[c.name for c in tree.get_commands()]}")
-        synced = await tree.sync(guild=guild)
-        print(f"Synced {len(synced)} slash command(s) to guild")
+        # Try guild sync first
+        try:
+            synced = await tree.sync(guild=guild)
+            print(f"Synced {len(synced)} slash command(s) to guild")
+        except discord.HTTPException as e:
+            print(f"Guild sync failed (HTTP {e.status}): {e.text}")
+            print("Falling back to global sync...")
+            synced = await tree.sync()
+            print(f"Synced {len(synced)} slash command(s) globally")
     except Exception as e:
         import traceback
         traceback.print_exc()
