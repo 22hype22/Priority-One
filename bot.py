@@ -1,5 +1,6 @@
 import io
 import re
+import asyncio
 import discord
 from discord.ext import commands
 from discord import app_commands
@@ -7,6 +8,9 @@ import aiohttp
 import json
 import os
 import traceback
+import spotipy
+from spotipy.oauth2 import SpotifyClientCredentials
+import yt_dlp
 
 TOKEN = os.getenv("DISCORD_TOKEN")
 
@@ -40,6 +44,29 @@ EMBED_COLOR = discord.Color.from_str("#181818")
 
 # Role that can manage tickets (Community Management)
 TICKET_STAFF_ROLE_ID = 1126332043517767690
+
+# Spotify client
+sp = spotipy.Spotify(auth_manager=SpotifyClientCredentials(
+    client_id=os.getenv("SPOTIFY_CLIENT_ID"),
+    client_secret=os.getenv("SPOTIFY_CLIENT_SECRET"),
+))
+
+# yt-dlp options for audio streaming
+YTDL_OPTIONS = {
+    "format": "bestaudio/best",
+    "noplaylist": True,
+    "quiet": True,
+    "no_warnings": True,
+    "default_search": "ytsearch",
+    "source_address": "0.0.0.0",
+}
+
+FFMPEG_OPTIONS = {
+    "before_options": "-reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 5",
+    "options": "-vn",
+}
+
+ytdl = yt_dlp.YoutubeDL(YTDL_OPTIONS)
 
 intents = discord.Intents.default()
 intents.message_content = True
@@ -625,6 +652,241 @@ async def ticket_error(interaction: discord.Interaction, error: app_commands.App
     )
 
 
+
+# ======================
+# MUSIC SYSTEM
+# ======================
+# /play  — paste a Spotify playlist URL or a song name
+# /skip  — skip current song
+# /previous — go back to previous song
+# /stop  — stop and disconnect
+#
+# Bot plays audio via YouTube, sourced from Spotify playlist metadata.
+# Leaves voice channel when the queue is empty.
+
+# Per-guild music state
+music_queues = {}      # guild_id -> list of {"title": str, "url": str}
+music_history = {}     # guild_id -> list of {"title": str, "url": str}
+music_current = {}     # guild_id -> {"title": str, "url": str} | None
+
+
+def get_queue(guild_id):
+    if guild_id not in music_queues:
+        music_queues[guild_id] = []
+    return music_queues[guild_id]
+
+def get_history(guild_id):
+    if guild_id not in music_history:
+        music_history[guild_id] = []
+    return music_history[guild_id]
+
+
+async def fetch_youtube_url(search: str) -> dict | None:
+    """Search YouTube for a track and return its stream URL and title."""
+    loop = asyncio.get_event_loop()
+    try:
+        data = await loop.run_in_executor(
+            None,
+            lambda: ytdl.extract_info(f"ytsearch:{search}", download=False)
+        )
+        if not data or "entries" not in data or not data["entries"]:
+            return None
+        entry = data["entries"][0]
+        return {"title": entry.get("title", search), "url": entry["url"]}
+    except Exception:
+        return None
+
+
+async def play_next(guild: discord.Guild, voice_client: discord.VoiceClient, text_channel):
+    """Play the next song in the queue, or disconnect if empty."""
+    guild_id = guild.id
+    queue = get_queue(guild_id)
+
+    if not queue:
+        music_current[guild_id] = None
+        await asyncio.sleep(1)
+        if voice_client.is_connected():
+            await voice_client.disconnect()
+        return
+
+    track = queue.pop(0)
+    music_current[guild_id] = track
+    get_history(guild_id).append(track)
+
+    try:
+        source = discord.FFmpegPCMAudio(track["url"], **FFMPEG_OPTIONS)
+        source = discord.PCMVolumeTransformer(source, volume=0.5)
+
+        def after_playing(error):
+            if error:
+                print(f"Player error: {error}")
+            fut = asyncio.run_coroutine_threadsafe(
+                play_next(guild, voice_client, text_channel),
+                voice_client.loop,
+            )
+            try:
+                fut.result()
+            except Exception as e:
+                print(f"Error in after_playing: {e}")
+
+        voice_client.play(source, after=after_playing)
+        await text_channel.send(f"🎵 Now playing: **{track['title']}**")
+
+    except Exception as e:
+        await text_channel.send(f"❌ Failed to play **{track['title']}**: {e}")
+        await play_next(guild, voice_client, text_channel)
+
+
+async def get_spotify_tracks(playlist_url: str) -> list[str]:
+    """Extract track search strings from a Spotify playlist URL."""
+    loop = asyncio.get_event_loop()
+    try:
+        # Extract playlist ID from URL
+        playlist_id = playlist_url.split("/playlist/")[-1].split("?")[0]
+
+        tracks = []
+        offset = 0
+        while True:
+            results = await loop.run_in_executor(
+                None,
+                lambda o=offset: sp.playlist_tracks(playlist_id, offset=o, limit=50)
+            )
+            items = results.get("items", [])
+            if not items:
+                break
+            for item in items:
+                track = item.get("track")
+                if track:
+                    name = track.get("name", "")
+                    artists = ", ".join(a["name"] for a in track.get("artists", []))
+                    tracks.append(f"{name} {artists}")
+            if not results.get("next"):
+                break
+            offset += 50
+
+        return tracks
+    except Exception as e:
+        print(f"Spotify error: {e}")
+        return []
+
+
+@tree.command(name="play", description="Play a Spotify playlist or search for a song")
+@app_commands.describe(query="Spotify playlist URL or song name")
+async def play_command(interaction: discord.Interaction, query: str):
+    if not interaction.user.voice:
+        return await interaction.response.send_message(
+            "❌ You need to be in a voice channel.", ephemeral=True
+        )
+
+    await interaction.response.defer()
+
+    guild = interaction.guild
+    guild_id = guild.id
+    voice_channel = interaction.user.voice.channel
+
+    # Connect or move to voice channel
+    voice_client = guild.voice_client
+    if voice_client is None:
+        voice_client = await voice_channel.connect()
+    elif voice_client.channel != voice_channel:
+        await voice_client.move_to(voice_channel)
+
+    queue = get_queue(guild_id)
+
+    # Spotify playlist
+    if "spotify.com/playlist" in query:
+        await interaction.followup.send("🔍 Fetching Spotify playlist...")
+        track_names = await get_spotify_tracks(query)
+        if not track_names:
+            return await interaction.followup.send("❌ Couldn't load that playlist. Make sure it's public.")
+
+        await interaction.followup.send(f"⏳ Loading **{len(track_names)}** tracks, this may take a moment...")
+
+        loaded = 0
+        for name in track_names:
+            track = await fetch_youtube_url(name)
+            if track:
+                queue.append(track)
+                loaded += 1
+
+        await interaction.followup.send(f"✅ Added **{loaded}** tracks to the queue.")
+
+    else:
+        # Single song search
+        track = await fetch_youtube_url(query)
+        if not track:
+            return await interaction.followup.send("❌ Couldn't find that song on YouTube.")
+        queue.append(track)
+        await interaction.followup.send(f"✅ Added **{track['title']}** to the queue.")
+
+    # Start playing if not already
+    if not voice_client.is_playing() and not voice_client.is_paused():
+        await play_next(guild, voice_client, interaction.channel)
+
+
+@tree.command(name="skip", description="Skip the current song")
+async def skip_command(interaction: discord.Interaction):
+    voice_client = interaction.guild.voice_client
+    if not voice_client or not voice_client.is_playing():
+        return await interaction.response.send_message(
+            "❌ Nothing is playing.", ephemeral=True
+        )
+    voice_client.stop()
+    await interaction.response.send_message("⏭️ Skipped.")
+
+
+@tree.command(name="previous", description="Play the previous song")
+async def previous_command(interaction: discord.Interaction):
+    guild = interaction.guild
+    guild_id = guild.id
+    history = get_history(guild_id)
+    queue = get_queue(guild_id)
+    voice_client = guild.voice_client
+
+    if not voice_client:
+        return await interaction.response.send_message(
+            "❌ Not in a voice channel.", ephemeral=True
+        )
+
+    # Need at least 2 in history: current + one before
+    if len(history) < 2:
+        return await interaction.response.send_message(
+            "❌ No previous song.", ephemeral=True
+        )
+
+    # Put current back at front of queue, go back to previous
+    current = music_current.get(guild_id)
+    if current:
+        queue.insert(0, current)
+
+    prev = history[-2]
+    queue.insert(0, prev)
+    # Trim history so we don't double-add
+    music_history[guild_id] = history[:-2]
+
+    voice_client.stop()
+    await interaction.response.send_message(f"⏮️ Going back to **{prev['title']}**.")
+
+
+@tree.command(name="stop", description="Stop music and disconnect")
+async def stop_command(interaction: discord.Interaction):
+    guild_id = interaction.guild.id
+    voice_client = interaction.guild.voice_client
+
+    if not voice_client:
+        return await interaction.response.send_message(
+            "❌ Not in a voice channel.", ephemeral=True
+        )
+
+    # Clear state
+    music_queues[guild_id] = []
+    music_history[guild_id] = []
+    music_current[guild_id] = None
+
+    voice_client.stop()
+    await voice_client.disconnect()
+    await interaction.response.send_message("⏹️ Stopped and disconnected.")
+
 # ======================
 # GLOBAL ERROR HANDLER
 # ======================
@@ -654,10 +916,10 @@ async def on_ready():
         activity=discord.Game(name="Priority One"),
     )
     try:
-        # Try global sync instead of guild-specific
-        print(f"Commands in tree before sync: {[c.name for c in tree.get_commands()]}")
-        synced = await tree.sync()
-        print(f"Synced {len(synced)} slash command(s) globally")
+        guild = discord.Object(id=1091573463979925576)
+        print(f"Commands in tree: {[c.name for c in tree.get_commands()]}")
+        synced = await tree.sync(guild=guild)
+        print(f"Synced {len(synced)} slash command(s) to guild")
     except Exception as e:
         import traceback
         traceback.print_exc()
