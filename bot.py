@@ -551,18 +551,21 @@ class TicketActionView(discord.ui.View):
                 read_message_history=True,
             )
 
-        await channel.edit(
-            overwrites=overwrites,
-            reason=f"Ticket closed by {interaction.user}",
-        )
-
+        # Notify then delete after a short delay
         for child in self.children:
             child.disabled = True
         await interaction.response.edit_message(view=self)
-
         await channel.send(
-            f"🔒 This ticket has been closed by {interaction.user.mention}."
+            f"🔒 This ticket has been closed by {interaction.user.mention}. Deleting in 5 seconds..."
         )
+        await asyncio.sleep(5)
+        await channel.delete(reason=f"Ticket closed by {interaction.user}")
+
+        # Delete the Tickets category if no ticket channels remain
+        guild = interaction.guild
+        tickets_category = discord.utils.get(guild.categories, name="Tickets")
+        if tickets_category and len(tickets_category.channels) == 0:
+            await tickets_category.delete(reason="No open tickets remaining")
 
 
 class TicketPanelView(discord.ui.View):
