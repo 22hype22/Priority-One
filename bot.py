@@ -547,7 +547,7 @@ class TicketPanelView(discord.ui.View):
 @tree.command(name="ticket", description="Post a ticket panel (admin only)")
 @app_commands.describe(
     title="Panel title",
-    description="Panel description",
+    body="Panel description text",
     drop1="First dropdown option (required)",
     msg1="Custom message shown when drop1 ticket is opened (optional)",
     drop2="Second dropdown option (optional)",
@@ -563,7 +563,7 @@ class TicketPanelView(discord.ui.View):
 async def ticket_command(
     interaction: discord.Interaction,
     title: str,
-    description: str,
+    body: str,
     drop1: str,
     msg1: str = None,
     drop2: str = None,
@@ -590,7 +590,7 @@ async def ticket_command(
 
     embed = discord.Embed(
         title=title,
-        description=description,
+        description=body,
         color=EMBED_COLOR,
     )
 
