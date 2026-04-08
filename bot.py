@@ -369,22 +369,26 @@ class TicketDropdown(discord.ui.Select):
         user = interaction.user
         staff_role = guild.get_role(TICKET_STAFF_ROLE_ID)
 
-        # Check for existing open ticket
+        # Check if user already has an open ticket for this specific category
         safe_name = re.sub(r"[^a-z0-9-]", "", user.name.lower().replace(" ", "-"))
         channel_name = f"ticket-{safe_name}"
-        existing = discord.utils.get(guild.text_channels, name=channel_name)
-        if existing:
-            return await interaction.response.send_message(
-                f"❌ You already have an open ticket: {existing.mention}",
-                ephemeral=True,
-            )
+        category_name = f"{category} Tickets"
+        existing_category = discord.utils.get(guild.categories, name=category_name)
+        if existing_category:
+            existing = discord.utils.get(existing_category.text_channels, name=channel_name)
+            if existing:
+                return await interaction.response.send_message(
+                    f"❌ You already have an open **{category}** ticket: {existing.mention}",
+                    ephemeral=True,
+                )
 
-        # Find or create Tickets category
-        tickets_category = discord.utils.get(guild.categories, name="Tickets")
+        # Find or create a category named "<Category> Tickets"
+        category_name = f"{category} Tickets"
+        tickets_category = discord.utils.get(guild.categories, name=category_name)
         if not tickets_category:
             try:
                 tickets_category = await guild.create_category(
-                    name="Tickets",
+                    name=category_name,
                     reason="Auto-created for ticket system",
                 )
             except discord.Forbidden:
@@ -561,11 +565,11 @@ class TicketActionView(discord.ui.View):
         await asyncio.sleep(5)
         await channel.delete(reason=f"Ticket closed by {interaction.user}")
 
-        # Delete the Tickets category if no ticket channels remain
+        # Delete the parent category if no ticket channels remain
         guild = interaction.guild
-        tickets_category = discord.utils.get(guild.categories, name="Tickets")
-        if tickets_category and len(tickets_category.channels) == 0:
-            await tickets_category.delete(reason="No open tickets remaining")
+        parent = channel.category
+        if parent and parent.name.endswith(" Tickets") and len(parent.channels) == 0:
+            await parent.delete(reason="No open tickets remaining")
 
 
 class TicketPanelView(discord.ui.View):
