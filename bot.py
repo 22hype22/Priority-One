@@ -337,6 +337,30 @@ async def say(ctx):
 async def say_error(ctx, error):
     if isinstance(error, commands.MissingPermissions):
         await ctx.reply("❌ You don't have permission to use this.", mention_author=False)
+    # All other errors are silently suppressed — discord.py's default
+    # "Please provide something" message is swallowed here.
+# ======================
+# GLOBAL ERROR HANDLER
+# ======================
+
+@bot.event
+async def on_command_error(ctx, error):
+    # Let command-specific error handlers take priority
+    if hasattr(ctx.command, "on_error"):
+        return
+    # Silently ignore "nothing provided" and similar non-critical errors
+    ignored = (
+        commands.MissingRequiredArgument,
+        commands.BadArgument,
+        commands.CommandNotFound,
+        commands.CheckFailure,
+    )
+    if isinstance(error, ignored):
+        return
+    # Re-raise anything unexpected so it still shows in console
+    raise error
+
+
 # ======================
 # STARTUP
 # ======================
