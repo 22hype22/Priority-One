@@ -655,9 +655,12 @@ async def on_ready():
     )
     try:
         guild = discord.Object(id=1091573463979925576)
+        print(f"Commands in tree before sync: {[c.name for c in tree.get_commands()]}")
         synced = await tree.sync(guild=guild)
         print(f"Synced {len(synced)} slash command(s) to guild")
     except Exception as e:
+        import traceback
+        traceback.print_exc()
         print(f"Failed to sync commands: {e}")
     print(f"Logged in as {bot.user}")
 
