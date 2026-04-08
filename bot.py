@@ -560,7 +560,6 @@ class TicketPanelView(discord.ui.View):
     msg5="Custom message shown when drop5 ticket is opened (optional)",
     banner="Banner image URL (optional)",
 )
-@app_commands.checks.has_permissions(administrator=True)
 async def ticket_command(
     interaction: discord.Interaction,
     title: str,
@@ -577,6 +576,10 @@ async def ticket_command(
     msg5: str = None,
     banner: str = None,
 ):
+    if not interaction.user.guild_permissions.administrator:
+        return await interaction.response.send_message(
+            "❌ You don't have permission to use this.", ephemeral=True
+        )
     options = [o for o in [drop1, drop2, drop3, drop4, drop5] if o]
 
     # Map each dropdown label to its custom message
@@ -617,10 +620,9 @@ async def ticket_command(
 
 @ticket_command.error
 async def ticket_error(interaction: discord.Interaction, error: app_commands.AppCommandError):
-    if isinstance(error, app_commands.MissingPermissions):
-        await interaction.response.send_message(
-            "❌ You don't have permission to use this.", ephemeral=True
-        )
+    await interaction.response.send_message(
+        f"❌ Something went wrong: {error}", ephemeral=True
+    )
 
 
 # ======================
@@ -653,10 +655,6 @@ async def on_ready():
     )
     try:
         guild = discord.Object(id=1091573463979925576)
-        # Clear any old global commands (removes duplicates)
-        tree.clear_commands(guild=None)
-        await tree.sync(guild=None)
-        # Sync guild-specific commands instantly
         synced = await tree.sync(guild=guild)
         print(f"Synced {len(synced)} slash command(s) to guild")
     except Exception as e:
