@@ -653,11 +653,10 @@ async def on_ready():
     )
     try:
         guild = discord.Object(id=1091573463979925576)
-        # Clear global commands so no duplicates appear
+        # Clear any old global commands (removes duplicates)
         tree.clear_commands(guild=None)
-        await tree.sync()
-        # Sync only to this guild for instant propagation
-        tree.copy_global_to(guild=guild)
+        await tree.sync(guild=None)
+        # Sync guild-specific commands instantly
         synced = await tree.sync(guild=guild)
         print(f"Synced {len(synced)} slash command(s) to guild")
     except Exception as e:
