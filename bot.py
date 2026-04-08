@@ -1,6 +1,8 @@
 import io
+import re
 import discord
 from discord.ext import commands
+from discord import app_commands
 import aiohttp
 import json
 import os
@@ -36,11 +38,15 @@ ROBLOX_TO_DISCORD_ROLE = {
 LINKS_FILE = "roblox_links.json"
 EMBED_COLOR = discord.Color.from_str("#181818")
 
+# Role that can manage tickets (Community Management)
+TICKET_STAFF_ROLE_ID = 1126332043517767690
+
 intents = discord.Intents.default()
 intents.message_content = True
 intents.members = True
 
 bot = commands.Bot(command_prefix="!", intents=intents, help_command=None)
+tree = bot.tree
 
 
 # ======================
@@ -58,13 +64,6 @@ def save_links(data):
         json.dump(data, f, indent=2)
 
 def parse_say_fields(message: str) -> dict:
-    """
-    Parse key=value fields from a !say message.
-    Supported keys: author (a), title (t), desc/description (d), footer (f), banner (b)
-    Continuation lines (indented) append to the current key.
-    Returns a dict with keys: author, title, desc, footer, banner
-    All values are strings or None if not provided.
-    """
     fields = {
         "author": [],
         "title": [],
@@ -84,17 +83,14 @@ def parse_say_fields(message: str) -> dict:
     for raw_line in message.splitlines():
         line = raw_line.rstrip()
 
-        # Blank lines reset continuation
         if not line.strip():
             current_key = None
             continue
 
-        # Continuation line (indented)
         if raw_line.startswith((" ", "\t")) and current_key:
             fields[current_key].append(raw_line.strip())
             continue
 
-        # Key=value line
         if "=" in line:
             key_raw, value = line.split("=", 1)
             key = key_raw.strip().lower()
@@ -113,12 +109,10 @@ def parse_say_fields(message: str) -> dict:
 
 
 async def fetch_image_bytes(url: str, session: aiohttp.ClientSession):
-    """Fetch raw image bytes from a URL. Returns (bytes, filename) or raises."""
     async with session.get(url) as resp:
         if resp.status != 200:
             raise ValueError(f"HTTP {resp.status} when fetching image")
         data = await resp.read()
-        # Try to get a filename from the URL path
         filename = url.split("?")[0].split("/")[-1] or "image.png"
         if "." not in filename:
             filename += ".png"
@@ -126,11 +120,6 @@ async def fetch_image_bytes(url: str, session: aiohttp.ClientSession):
 
 
 async def resolve_banner(ctx, fields: dict, session: aiohttp.ClientSession):
-    """
-    Returns a discord.File for the banner, or None.
-    Priority: attachment on message > banner= URL > None
-    """
-    # 1) File attachment takes priority
     if ctx.message.attachments:
         att = ctx.message.attachments[0]
         try:
@@ -141,7 +130,6 @@ async def resolve_banner(ctx, fields: dict, session: aiohttp.ClientSession):
         except Exception as e:
             raise RuntimeError(f"Failed to download attachment: {e}")
 
-    # 2) banner= URL
     if fields.get("banner"):
         url = fields["banner"].strip()
         try:
@@ -160,7 +148,6 @@ async def resolve_banner(ctx, fields: dict, session: aiohttp.ClientSession):
 # ======================
 
 async def roblox_username_to_userid(username: str):
-    """Resolve a Roblox username to a user ID via the Roblox API."""
     url = "https://users.roblox.com/v1/usernames/users"
     payload = {"usernames": [username], "excludeBannedUsers": False}
     async with aiohttp.ClientSession() as session:
@@ -172,7 +159,6 @@ async def roblox_username_to_userid(username: str):
             return users[0]["id"] if users else None
 
 async def roblox_group_role_name(user_id: int, group_id: int):
-    """Get the role name of a Roblox user in a group."""
     url = f"https://groups.roblox.com/v1/users/{user_id}/groups/roles"
     async with aiohttp.ClientSession() as session:
         async with session.get(url) as resp:
@@ -236,26 +222,17 @@ async def update(ctx):
 # ======================
 # SAY COMMAND
 # ======================
-# Usage:
-#   !say          — plain text output, supports all fields
-#   !say embed    — embedded message output
+# !say          — plain text
+# !say embed    — embedded message
 #
-# Fields (all optional, any combination):
-#   author= or a=
-#   title=  or t=
-#   desc=   or description= or d=
-#   footer= or f=
-#   banner= or b=   (paste a URL, or attach a file, or both — attachment wins)
-#
-# Multiline values: use shift+enter and indent continuation lines.
+# Fields: author=, title=, desc=/description=, footer=, banner=
+# Attach a file or paste a URL for banner. Attachment wins over URL.
 
 @bot.command()
 @commands.has_permissions(administrator=True)
 async def say(ctx):
-    # Everything after !say, leading/trailing whitespace stripped
     after_cmd = ctx.message.content[len(ctx.prefix + ctx.invoked_with):].strip()
 
-    # First token determines mode (split handles newlines from shift+enter)
     tokens = after_cmd.split(None, 1)
     first = tokens[0].lower() if tokens else ""
 
@@ -266,21 +243,16 @@ async def say(ctx):
         use_embed = False
         message = after_cmd
 
-    # Save channel before deletion — ctx.send after delete still works but
-    # using channel.send is explicit and safe
     channel = ctx.channel
 
     async with aiohttp.ClientSession() as session:
-        # Parse fields
         fields = parse_say_fields(message)
 
-        # Resolve banner BEFORE deleting the message (attachment URL expires after delete)
         try:
             banner_file = await resolve_banner(ctx, fields, session)
         except RuntimeError as e:
             return await ctx.reply(f"❌ {e}", mention_author=False)
 
-        # Delete the command message
         try:
             await ctx.message.delete()
         except discord.Forbidden:
@@ -289,7 +261,6 @@ async def say(ctx):
                 mention_author=False,
             )
 
-        # Send output
         try:
             if use_embed:
                 embed = discord.Embed(color=EMBED_COLOR)
@@ -310,7 +281,6 @@ async def say(ctx):
                     await channel.send(embed=embed)
 
             else:
-                # Plain text — stack fields as formatted lines
                 lines = []
                 if fields["author"]:
                     lines.append(f"**{fields['author']}**")
@@ -337,15 +307,296 @@ async def say(ctx):
 async def say_error(ctx, error):
     if isinstance(error, commands.MissingPermissions):
         await ctx.reply("❌ You don't have permission to use this.", mention_author=False)
-    # All other errors are silently suppressed — discord.py's default
-    # "Please provide something" message is swallowed here.
+
+
+# ======================
+# TICKET SYSTEM
+# ======================
+# /ticket — slash command, admin only
+# Fields: title, description, banner (URL, optional), drop1–drop5
+# Users pick a category from the dropdown → private ticket channel created
+# Inside ticket: Claim button (staff only) + Close button (staff only)
+# Claim: locks channel to claimer + opener only (staff role loses send perms)
+# Close: locks channel for everyone
+
+class TicketDropdown(discord.ui.Select):
+    def __init__(self, options: list):
+        select_options = [
+            discord.SelectOption(label=opt, value=opt)
+            for opt in options
+        ]
+        super().__init__(
+            placeholder="Select a category to open a ticket...",
+            min_values=1,
+            max_values=1,
+            options=select_options,
+            custom_id="ticket_dropdown",
+        )
+
+    async def callback(self, interaction: discord.Interaction):
+        category = self.values[0]
+        guild = interaction.guild
+        user = interaction.user
+        staff_role = guild.get_role(TICKET_STAFF_ROLE_ID)
+
+        # Check for existing open ticket
+        safe_name = re.sub(r"[^a-z0-9-]", "", user.name.lower().replace(" ", "-"))
+        channel_name = f"ticket-{safe_name}"
+        existing = discord.utils.get(guild.text_channels, name=channel_name)
+        if existing:
+            return await interaction.response.send_message(
+                f"❌ You already have an open ticket: {existing.mention}",
+                ephemeral=True,
+            )
+
+        # Permission overwrites for new ticket channel
+        overwrites = {
+            guild.default_role: discord.PermissionOverwrite(view_channel=False),
+            user: discord.PermissionOverwrite(
+                view_channel=True,
+                send_messages=True,
+                read_message_history=True,
+            ),
+            guild.me: discord.PermissionOverwrite(
+                view_channel=True,
+                send_messages=True,
+                manage_channels=True,
+                read_message_history=True,
+            ),
+        }
+        if staff_role:
+            overwrites[staff_role] = discord.PermissionOverwrite(
+                view_channel=True,
+                send_messages=True,
+                read_message_history=True,
+                manage_channels=True,
+            )
+
+        try:
+            ticket_channel = await guild.create_text_channel(
+                name=channel_name,
+                overwrites=overwrites,
+                reason=f"Ticket opened by {user} — {category}",
+            )
+        except discord.Forbidden:
+            return await interaction.response.send_message(
+                "❌ I don't have permission to create channels.",
+                ephemeral=True,
+            )
+
+        embed = discord.Embed(
+            title=f"Ticket — {category}",
+            description=(
+                f"Thanks for opening a ticket, {user.mention}!\n"
+                f"**Category:** {category}\n\n"
+                "Staff will be with you shortly.\n"
+                "Use the buttons below to claim or close this ticket."
+            ),
+            color=EMBED_COLOR,
+        )
+        embed.set_footer(text=f"Opened by {user.display_name}")
+
+        view = TicketActionView(opener_id=user.id)
+        await ticket_channel.send(
+            content=user.mention,
+            embed=embed,
+            view=view,
+        )
+
+        await interaction.response.send_message(
+            f"✅ Your ticket has been created: {ticket_channel.mention}",
+            ephemeral=True,
+        )
+
+
+class TicketActionView(discord.ui.View):
+    def __init__(self, opener_id: int = 0):
+        super().__init__(timeout=None)
+        self.opener_id = opener_id
+
+    def _is_staff(self, member: discord.Member) -> bool:
+        return any(r.id == TICKET_STAFF_ROLE_ID for r in member.roles)
+
+    @discord.ui.button(
+        label="Claim",
+        style=discord.ButtonStyle.primary,
+        emoji="🙋",
+        custom_id="ticket_claim",
+    )
+    async def claim(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if not self._is_staff(interaction.user):
+            return await interaction.response.send_message(
+                "❌ Only staff can claim tickets.", ephemeral=True
+            )
+
+        channel = interaction.channel
+        guild = interaction.guild
+        staff_role = guild.get_role(TICKET_STAFF_ROLE_ID)
+
+        overwrites = {
+            guild.default_role: discord.PermissionOverwrite(view_channel=False),
+            guild.me: discord.PermissionOverwrite(
+                view_channel=True,
+                send_messages=True,
+                manage_channels=True,
+                read_message_history=True,
+            ),
+            # Claimer gets full access
+            interaction.user: discord.PermissionOverwrite(
+                view_channel=True,
+                send_messages=True,
+                read_message_history=True,
+            ),
+        }
+
+        # Staff role can view but not send — claimer handles it
+        if staff_role:
+            overwrites[staff_role] = discord.PermissionOverwrite(
+                view_channel=True,
+                send_messages=False,
+                read_message_history=True,
+            )
+
+        # Opener keeps send access
+        opener = guild.get_member(self.opener_id)
+        if opener:
+            overwrites[opener] = discord.PermissionOverwrite(
+                view_channel=True,
+                send_messages=True,
+                read_message_history=True,
+            )
+
+        await channel.edit(overwrites=overwrites)
+
+        button.disabled = True
+        button.label = f"Claimed by {interaction.user.display_name}"
+        await interaction.response.edit_message(view=self)
+
+        await channel.send(
+            f"🙋 {interaction.user.mention} has claimed this ticket."
+        )
+
+    @discord.ui.button(
+        label="Close",
+        style=discord.ButtonStyle.danger,
+        emoji="🔒",
+        custom_id="ticket_close",
+    )
+    async def close(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if not self._is_staff(interaction.user):
+            return await interaction.response.send_message(
+                "❌ Only staff can close tickets.", ephemeral=True
+            )
+
+        channel = interaction.channel
+        guild = interaction.guild
+        staff_role = guild.get_role(TICKET_STAFF_ROLE_ID)
+
+        overwrites = {
+            guild.default_role: discord.PermissionOverwrite(view_channel=False),
+            guild.me: discord.PermissionOverwrite(
+                view_channel=True,
+                send_messages=True,
+                manage_channels=True,
+                read_message_history=True,
+            ),
+        }
+        if staff_role:
+            overwrites[staff_role] = discord.PermissionOverwrite(
+                view_channel=True,
+                send_messages=False,
+                read_message_history=True,
+            )
+
+        await channel.edit(
+            overwrites=overwrites,
+            reason=f"Ticket closed by {interaction.user}",
+        )
+
+        for child in self.children:
+            child.disabled = True
+        await interaction.response.edit_message(view=self)
+
+        await channel.send(
+            f"🔒 This ticket has been closed by {interaction.user.mention}."
+        )
+
+
+class TicketPanelView(discord.ui.View):
+    def __init__(self, options: list):
+        super().__init__(timeout=None)
+        self.add_item(TicketDropdown(options))
+
+
+@tree.command(name="ticket", description="Post a ticket panel (admin only)")
+@app_commands.describe(
+    title="Panel title",
+    description="Panel description",
+    drop1="First dropdown option (required)",
+    drop2="Second dropdown option (optional)",
+    drop3="Third dropdown option (optional)",
+    drop4="Fourth dropdown option (optional)",
+    drop5="Fifth dropdown option (optional)",
+    banner="Banner image URL (optional)",
+)
+@app_commands.checks.has_permissions(administrator=True)
+async def ticket_command(
+    interaction: discord.Interaction,
+    title: str,
+    description: str,
+    drop1: str,
+    drop2: str = None,
+    drop3: str = None,
+    drop4: str = None,
+    drop5: str = None,
+    banner: str = None,
+):
+    options = [o for o in [drop1, drop2, drop3, drop4, drop5] if o]
+
+    embed = discord.Embed(
+        title=title,
+        description=description,
+        color=EMBED_COLOR,
+    )
+
+    view = TicketPanelView(options=options)
+
+    await interaction.response.defer(ephemeral=True)
+
+    if banner:
+        async with aiohttp.ClientSession() as session:
+            try:
+                data, filename = await fetch_image_bytes(banner, session)
+                buf = io.BytesIO(data)
+                buf.seek(0)
+                f = discord.File(fp=buf, filename=filename)
+                embed.set_image(url=f"attachment://{filename}")
+                await interaction.channel.send(file=f, embed=embed, view=view)
+            except Exception as e:
+                await interaction.followup.send(
+                    f"❌ Failed to fetch banner: {e}", ephemeral=True
+                )
+                return
+    else:
+        await interaction.channel.send(embed=embed, view=view)
+
+    await interaction.followup.send("✅ Ticket panel posted.", ephemeral=True)
+
+
+@ticket_command.error
+async def ticket_error(interaction: discord.Interaction, error: app_commands.AppCommandError):
+    if isinstance(error, app_commands.MissingPermissions):
+        await interaction.response.send_message(
+            "❌ You don't have permission to use this.", ephemeral=True
+        )
+
+
 # ======================
 # GLOBAL ERROR HANDLER
 # ======================
 
 @bot.event
 async def on_command_error(ctx, error):
-    # Silently ignore all non-critical errors including "Please provide something"
     ignored = (
         commands.MissingRequiredArgument,
         commands.BadArgument,
@@ -355,7 +606,6 @@ async def on_command_error(ctx, error):
     )
     if isinstance(error, ignored):
         return
-    # Re-raise anything unexpected so it still shows in console
     raise error
 
 
@@ -369,6 +619,11 @@ async def on_ready():
         status=discord.Status.online,
         activity=discord.Game(name="Priority One"),
     )
+    try:
+        synced = await tree.sync()
+        print(f"Synced {len(synced)} slash command(s)")
+    except Exception as e:
+        print(f"Failed to sync commands: {e}")
     print(f"Logged in as {bot.user}")
 
 
