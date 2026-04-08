@@ -355,6 +355,7 @@ class TicketDropdown(discord.ui.Select):
             discord.SelectOption(label=opt, value=opt)
             for opt in options
         ]
+        # Use a stable custom_id — options are encoded in the message embed
         super().__init__(
             placeholder="Select a category to open a ticket...",
             min_values=1,
@@ -362,6 +363,26 @@ class TicketDropdown(discord.ui.Select):
             options=select_options,
             custom_id="ticket_dropdown",
         )
+
+    @classmethod
+    def from_message(cls, message: discord.Message):
+        """Rebuild dropdown from a ticket panel message's embed fields."""
+        if not message.embeds:
+            return None
+        embed = message.embeds[0]
+        # Options and custom messages stored in embed footer as JSON
+        if not embed.footer or not embed.footer.text:
+            return None
+        try:
+            import json as _json
+            data = _json.loads(embed.footer.text)
+            options = data.get("options", [])
+            custom_messages = data.get("messages", {})
+            if not options:
+                return None
+            return cls(options=options, custom_messages=custom_messages)
+        except Exception:
+            return None
 
     async def callback(self, interaction: discord.Interaction):
         category = self.values[0]
@@ -630,11 +651,15 @@ async def ticket_command(
         if label and msg:
             custom_messages[label] = msg
 
+    import json as _json
+    footer_data = _json.dumps({"options": options, "messages": custom_messages})
+
     embed = discord.Embed(
         title=title,
         description=body,
         color=EMBED_COLOR,
     )
+    embed.set_footer(text=footer_data)
 
     view = TicketPanelView(options=options, custom_messages=custom_messages)
 
@@ -658,6 +683,32 @@ async def ticket_command(
         await interaction.channel.send(embed=embed, view=view)
 
     await interaction.followup.send("✅ Ticket panel posted.", ephemeral=True)
+
+
+async def restore_ticket_panels(bot: commands.Bot):
+    """On startup, re-register persistent views for all ticket panel messages."""
+    import json as _json
+    for guild in bot.guilds:
+        for channel in guild.text_channels:
+            try:
+                async for message in channel.history(limit=50):
+                    if message.author == guild.me and message.embeds:
+                        embed = message.embeds[0]
+                        if embed.footer and embed.footer.text:
+                            try:
+                                data = _json.loads(embed.footer.text)
+                                options = data.get("options", [])
+                                custom_messages = data.get("messages", {})
+                                if options:
+                                    view = TicketPanelView(
+                                        options=options,
+                                        custom_messages=custom_messages,
+                                    )
+                                    bot.add_view(view, message_id=message.id)
+                            except Exception:
+                                pass
+            except Exception:
+                pass
 
 
 @ticket_command.error
@@ -932,6 +983,7 @@ async def on_ready():
     )
     # Re-register persistent views so buttons work after restarts
     bot.add_view(TicketActionView())
+    await restore_ticket_panels(bot)
 
     try:
         guild = discord.Object(id=1091573463979925576)
