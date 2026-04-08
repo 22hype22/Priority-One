@@ -654,10 +654,10 @@ async def on_ready():
         activity=discord.Game(name="Priority One"),
     )
     try:
-        guild = discord.Object(id=1091573463979925576)
+        # Try global sync instead of guild-specific
         print(f"Commands in tree before sync: {[c.name for c in tree.get_commands()]}")
-        synced = await tree.sync(guild=guild)
-        print(f"Synced {len(synced)} slash command(s) to guild")
+        synced = await tree.sync()
+        print(f"Synced {len(synced)} slash command(s) globally")
     except Exception as e:
         import traceback
         traceback.print_exc()
