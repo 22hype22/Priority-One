@@ -40,7 +40,7 @@ intents = discord.Intents.default()
 intents.message_content = True
 intents.members = True
 
-bot = commands.Bot(command_prefix="!", intents=intents)
+bot = commands.Bot(command_prefix="!", intents=intents, help_command=None)
 
 
 # ======================
@@ -345,15 +345,13 @@ async def say_error(ctx, error):
 
 @bot.event
 async def on_command_error(ctx, error):
-    # Let command-specific error handlers take priority
-    if hasattr(ctx.command, "on_error"):
-        return
-    # Silently ignore "nothing provided" and similar non-critical errors
+    # Silently ignore all non-critical errors including "Please provide something"
     ignored = (
         commands.MissingRequiredArgument,
         commands.BadArgument,
         commands.CommandNotFound,
         commands.CheckFailure,
+        commands.MissingPermissions,
     )
     if isinstance(error, ignored):
         return
