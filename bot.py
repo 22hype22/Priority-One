@@ -320,7 +320,10 @@ async def say_error(ctx, error):
 # Close: locks channel for everyone
 
 class TicketDropdown(discord.ui.Select):
-    def __init__(self, options: list):
+    def __init__(self, options: list, custom_messages: dict):
+        # options is a list of label strings
+        # custom_messages is {label: custom_text} for per-category messages
+        self.custom_messages = custom_messages
         select_options = [
             discord.SelectOption(label=opt, value=opt)
             for opt in options
@@ -349,6 +352,17 @@ class TicketDropdown(discord.ui.Select):
                 ephemeral=True,
             )
 
+        # Find or create Tickets category
+        tickets_category = discord.utils.get(guild.categories, name="Tickets")
+        if not tickets_category:
+            try:
+                tickets_category = await guild.create_category(
+                    name="Tickets",
+                    reason="Auto-created for ticket system",
+                )
+            except discord.Forbidden:
+                tickets_category = None
+
         # Permission overwrites for new ticket channel
         overwrites = {
             guild.default_role: discord.PermissionOverwrite(view_channel=False),
@@ -375,6 +389,7 @@ class TicketDropdown(discord.ui.Select):
         try:
             ticket_channel = await guild.create_text_channel(
                 name=channel_name,
+                category=tickets_category,
                 overwrites=overwrites,
                 reason=f"Ticket opened by {user} — {category}",
             )
@@ -384,14 +399,15 @@ class TicketDropdown(discord.ui.Select):
                 ephemeral=True,
             )
 
+        # Build intro embed
+        custom_msg = self.custom_messages.get(category, "")
+        desc = f"Thanks for opening a ticket, {user.mention}!\n**Category:** {category}"
+        if custom_msg:
+            desc += f"\n\n{custom_msg}"
+
         embed = discord.Embed(
             title=f"Ticket — {category}",
-            description=(
-                f"Thanks for opening a ticket, {user.mention}!\n"
-                f"**Category:** {category}\n\n"
-                "Staff will be with you shortly.\n"
-                "Use the buttons below to claim or close this ticket."
-            ),
+            description=desc,
             color=EMBED_COLOR,
         )
         embed.set_footer(text=f"Opened by {user.display_name}")
@@ -419,7 +435,7 @@ class TicketActionView(discord.ui.View):
 
     @discord.ui.button(
         label="Claim",
-        style=discord.ButtonStyle.primary,
+        style=discord.ButtonStyle.success,
         emoji="🙋",
         custom_id="ticket_claim",
     )
@@ -523,9 +539,9 @@ class TicketActionView(discord.ui.View):
 
 
 class TicketPanelView(discord.ui.View):
-    def __init__(self, options: list):
+    def __init__(self, options: list, custom_messages: dict):
         super().__init__(timeout=None)
-        self.add_item(TicketDropdown(options))
+        self.add_item(TicketDropdown(options, custom_messages))
 
 
 @tree.command(name="ticket", description="Post a ticket panel (admin only)")
@@ -533,10 +549,15 @@ class TicketPanelView(discord.ui.View):
     title="Panel title",
     description="Panel description",
     drop1="First dropdown option (required)",
+    msg1="Custom message shown when drop1 ticket is opened (optional)",
     drop2="Second dropdown option (optional)",
+    msg2="Custom message shown when drop2 ticket is opened (optional)",
     drop3="Third dropdown option (optional)",
+    msg3="Custom message shown when drop3 ticket is opened (optional)",
     drop4="Fourth dropdown option (optional)",
+    msg4="Custom message shown when drop4 ticket is opened (optional)",
     drop5="Fifth dropdown option (optional)",
+    msg5="Custom message shown when drop5 ticket is opened (optional)",
     banner="Banner image URL (optional)",
 )
 @app_commands.checks.has_permissions(administrator=True)
@@ -545,13 +566,24 @@ async def ticket_command(
     title: str,
     description: str,
     drop1: str,
+    msg1: str = None,
     drop2: str = None,
+    msg2: str = None,
     drop3: str = None,
+    msg3: str = None,
     drop4: str = None,
+    msg4: str = None,
     drop5: str = None,
+    msg5: str = None,
     banner: str = None,
 ):
     options = [o for o in [drop1, drop2, drop3, drop4, drop5] if o]
+
+    # Map each dropdown label to its custom message
+    custom_messages = {}
+    for label, msg in zip([drop1, drop2, drop3, drop4, drop5], [msg1, msg2, msg3, msg4, msg5]):
+        if label and msg:
+            custom_messages[label] = msg
 
     embed = discord.Embed(
         title=title,
@@ -559,7 +591,7 @@ async def ticket_command(
         color=EMBED_COLOR,
     )
 
-    view = TicketPanelView(options=options)
+    view = TicketPanelView(options=options, custom_messages=custom_messages)
 
     await interaction.response.defer(ephemeral=True)
 
@@ -621,6 +653,10 @@ async def on_ready():
     )
     try:
         guild = discord.Object(id=1091573463979925576)
+        # Clear global commands so no duplicates appear
+        tree.clear_commands(guild=None)
+        await tree.sync()
+        # Sync only to this guild for instant propagation
         tree.copy_global_to(guild=guild)
         synced = await tree.sync(guild=guild)
         print(f"Synced {len(synced)} slash command(s) to guild")
