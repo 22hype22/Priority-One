@@ -135,7 +135,9 @@ async def resolve_banner(ctx, fields: dict, session: aiohttp.ClientSession):
         att = ctx.message.attachments[0]
         try:
             data, filename = await fetch_image_bytes(att.url, session)
-            return discord.File(fp=io.BytesIO(data), filename=filename)
+            buf = io.BytesIO(data)
+            buf.seek(0)
+            return discord.File(fp=buf, filename=filename)
         except Exception as e:
             raise RuntimeError(f"Failed to download attachment: {e}")
 
@@ -144,7 +146,9 @@ async def resolve_banner(ctx, fields: dict, session: aiohttp.ClientSession):
         url = fields["banner"].strip()
         try:
             data, filename = await fetch_image_bytes(url, session)
-            return discord.File(fp=io.BytesIO(data), filename=filename)
+            buf = io.BytesIO(data)
+            buf.seek(0)
+            return discord.File(fp=buf, filename=filename)
         except Exception as e:
             raise RuntimeError(f"Failed to download banner URL: {e}")
 
