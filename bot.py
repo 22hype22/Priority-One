@@ -237,45 +237,46 @@ async def update(ctx):
 #   !say embed    — embedded message output
 #
 # Fields (all optional, any combination):
-#   author=   or  a=
-#   title=    or  t=
-#   desc=     or  description=  or  d=
-#   footer=   or  f=
-#   banner=   or  b=   (URL or leave blank and attach a file)
+#   author= or a=
+#   title=  or t=
+#   desc=   or description= or d=
+#   footer= or f=
+#   banner= or b=   (paste a URL, or attach a file, or both — attachment wins)
 #
-# Multiline values: indent continuation lines with a space or tab.
+# Multiline values: use shift+enter and indent continuation lines.
 
 @bot.command()
 @commands.has_permissions(administrator=True)
 async def say(ctx):
-    """
-    !say [embed] [fields...]
-    If first word after !say is 'embed', sends an embed. Otherwise plain text.
-    """
-    # Pull the full content after !say
+    # Everything after !say, leading/trailing whitespace stripped
     after_cmd = ctx.message.content[len(ctx.prefix + ctx.invoked_with):].strip()
 
-    # Check if first word is 'embed'
-    parts = after_cmd.split(None, 1)
-    first = parts[0].lower() if parts else ""
+    # First token determines mode (split handles newlines from shift+enter)
+    tokens = after_cmd.split(None, 1)
+    first = tokens[0].lower() if tokens else ""
+
     if first == "embed":
         use_embed = True
-        message = parts[1] if len(parts) > 1 else ""
+        message = tokens[1].strip() if len(tokens) > 1 else ""
     else:
         use_embed = False
         message = after_cmd
 
+    # Save channel before deletion — ctx.send after delete still works but
+    # using channel.send is explicit and safe
+    channel = ctx.channel
+
     async with aiohttp.ClientSession() as session:
-        # --- Parse fields ---
+        # Parse fields
         fields = parse_say_fields(message)
 
-        # --- Resolve banner ---
+        # Resolve banner BEFORE deleting the message (attachment URL expires after delete)
         try:
             banner_file = await resolve_banner(ctx, fields, session)
         except RuntimeError as e:
             return await ctx.reply(f"❌ {e}", mention_author=False)
 
-        # --- Delete invoking message ---
+        # Delete the command message
         try:
             await ctx.message.delete()
         except discord.Forbidden:
@@ -284,11 +285,10 @@ async def say(ctx):
                 mention_author=False,
             )
 
-        # --- Send ---
+        # Send output
         try:
             if use_embed:
                 embed = discord.Embed(color=EMBED_COLOR)
-
                 if fields["title"]:
                     embed.title = fields["title"]
                 if fields["desc"]:
@@ -297,36 +297,33 @@ async def say(ctx):
                     embed.set_author(name=fields["author"])
                 if fields["footer"]:
                     embed.set_footer(text=fields["footer"])
-
-                # If banner, attach as image inside embed
                 if banner_file:
                     embed.set_image(url=f"attachment://{banner_file.filename}")
-                    await ctx.send(file=banner_file, embed=embed)
+                    await channel.send(file=banner_file, embed=embed)
                 else:
-                    await ctx.send(embed=embed)
+                    await channel.send(embed=embed)
 
             else:
-                # Plain text mode — build a readable message
-                parts = []
+                # Plain text — stack fields as formatted lines
+                lines = []
                 if fields["author"]:
-                    parts.append(f"**{fields['author']}**")
+                    lines.append(f"**{fields['author']}**")
                 if fields["title"]:
-                    parts.append(f"**{fields['title']}**")
+                    lines.append(f"**{fields['title']}**")
                 if fields["desc"]:
-                    parts.append(fields["desc"])
+                    lines.append(fields["desc"])
                 if fields["footer"]:
-                    parts.append(f"-# {fields['footer']}")
+                    lines.append(f"-# {fields['footer']}")
 
-                text = "\n".join(parts) if parts else None
-
+                text = "\n".join(lines) if lines else None
                 if text:
-                    await ctx.send(text)
+                    await channel.send(text)
                 if banner_file:
-                    await ctx.send(file=banner_file)
+                    await channel.send(file=banner_file)
 
         except Exception as e:
             traceback.print_exc()
-            await ctx.send(
+            await channel.send(
                 f"❌ Failed to post: `{type(e).__name__}: {str(e)[:180]}`"
             )
 
@@ -334,13 +331,6 @@ async def say(ctx):
 async def say_error(ctx, error):
     if isinstance(error, commands.MissingPermissions):
         await ctx.reply("❌ You don't have permission to use this.", mention_author=False)
-    elif isinstance(error, commands.MissingRequiredArgument):
-        await ctx.reply(
-            "Usage: `!say` or `!say embed` followed by your fields.",
-            mention_author=False,
-        )
-
-
 # ======================
 # STARTUP
 # ======================
