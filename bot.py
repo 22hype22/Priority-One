@@ -303,6 +303,8 @@ async def say(ctx):
                     embed.set_footer(text=fields["footer"])
                 if banner_file:
                     embed.set_image(url=f"attachment://{banner_file.filename}")
+                    if not any([fields["title"], fields["desc"], fields["author"], fields["footer"]]):
+                        embed.description = "\u200b"
                     await channel.send(file=banner_file, embed=embed)
                 else:
                     await channel.send(embed=embed)
