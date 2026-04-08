@@ -422,6 +422,7 @@ class TicketDropdown(discord.ui.Select):
                 name=channel_name,
                 category=tickets_category,
                 overwrites=overwrites,
+                topic=f"opener:{user.id}",
                 reason=f"Ticket opened by {user} — {category}",
             )
         except discord.Forbidden:
@@ -504,8 +505,15 @@ class TicketActionView(discord.ui.View):
                 read_message_history=True,
             )
 
-        # Opener keeps send access
-        opener = guild.get_member(self.opener_id)
+        # Recover opener_id from channel topic if not set (e.g. after bot restart)
+        opener_id = self.opener_id
+        if not opener_id and channel.topic and channel.topic.startswith("opener:"):
+            try:
+                opener_id = int(channel.topic.split("opener:")[1])
+            except ValueError:
+                pass
+
+        opener = guild.get_member(opener_id) if opener_id else None
         if opener:
             overwrites[opener] = discord.PermissionOverwrite(
                 view_channel=True,
@@ -922,6 +930,9 @@ async def on_ready():
         status=discord.Status.online,
         activity=discord.Game(name="Priority One"),
     )
+    # Re-register persistent views so buttons work after restarts
+    bot.add_view(TicketActionView())
+
     try:
         guild = discord.Object(id=1091573463979925576)
         print(f"Commands in tree: {[c.name for c in tree.get_commands()]}")
