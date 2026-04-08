@@ -620,8 +620,10 @@ async def on_ready():
         activity=discord.Game(name="Priority One"),
     )
     try:
-        synced = await tree.sync()
-        print(f"Synced {len(synced)} slash command(s)")
+        guild = discord.Object(id=1091573463979925576)
+        tree.copy_global_to(guild=guild)
+        synced = await tree.sync(guild=guild)
+        print(f"Synced {len(synced)} slash command(s) to guild")
     except Exception as e:
         print(f"Failed to sync commands: {e}")
     print(f"Logged in as {bot.user}")
