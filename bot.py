@@ -69,8 +69,10 @@ YTDL_OPTIONS = {
     },
 }
 
+import shutil as _shutil
+FFMPEG_PATH = _shutil.which("ffmpeg") or "ffmpeg"
 FFMPEG_OPTIONS = {
-    "executable": "ffmpeg",
+    "executable": FFMPEG_PATH,
     "before_options": "-reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 5",
     "options": "-vn",
 }
