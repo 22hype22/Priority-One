@@ -3,3 +3,4 @@ aiohttp
 spotipy
 yt-dlp
 PyNaCl
+ffmpeg-python
