@@ -191,12 +191,12 @@ async def update(ctx):
 # All other fields optional. Banner accepts a file attachment or URL.
 
 class SayModeChoice(str, discord.Enum):
-    plain = "plain"
+    normal = "normal"
     embed = "embed"
 
 @tree.command(name="say", description="Post a message as the bot (admin only)")
 @app_commands.describe(
-    mode="Choose Plain or Embed",
+    mode="Choose Normal or Embed",
     title="Title of the message",
     author="Author name (embed only)",
     desc="Main body text",
@@ -206,7 +206,7 @@ class SayModeChoice(str, discord.Enum):
 )
 async def say_command(
     interaction: discord.Interaction,
-    mode: SayModeChoice = SayModeChoice.plain,
+    mode: SayModeChoice = SayModeChoice.normal,
     title: str = None,
     author: str = None,
     desc: str = None,
