@@ -720,10 +720,12 @@ async def fetch_youtube_url(search: str) -> dict | None:
             lambda: ytdl.extract_info(f"ytsearch:{search}", download=False)
         )
         if not data or "entries" not in data or not data["entries"]:
+            print(f"[music] No entries found for: {search}")
             return None
         entry = data["entries"][0]
         return {"title": entry.get("title", search), "url": entry["url"]}
-    except Exception:
+    except Exception as e:
+        print(f"[music] fetch_youtube_url error for '{search}': {type(e).__name__}: {e}")
         return None
 
 
