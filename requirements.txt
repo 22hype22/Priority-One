@@ -1,6 +1,5 @@
 discord.py[voice]
 aiohttp
 spotipy
-yt-dlp
 PyNaCl
-ffmpeg-python
+wavelink
