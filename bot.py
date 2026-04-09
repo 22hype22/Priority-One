@@ -52,18 +52,10 @@ sp = spotipy.Spotify(auth_manager=SpotifyClientCredentials(
     client_secret=os.getenv("SPOTIFY_CLIENT_SECRET"),
 ))
 
-# Lavalink nodes — free public nodes with YouTube support
-LAVALINK_NODES = [
-    # Primary — 99.99% uptime
-    wavelink.Node(
-        uri="http://lavalink.jirayu.net:13592",
-        password="youshallnotpass",
-    ),
-    # Backup
-    wavelink.Node(
-        uri="http://lava.g3v.co.uk:9008",
-        password="lavalinklol",
-    ),
+# Lavalink node config — nodes are created inside on_ready to avoid event loop issues
+LAVALINK_NODE_CONFIGS = [
+    {"uri": "http://lavalink.jirayu.net:13592", "password": "youshallnotpass"},
+    {"uri": "http://lava.g3v.co.uk:9008", "password": "lavalinklol"},
 ]
 
 intents = discord.Intents.default()
@@ -896,9 +888,10 @@ async def on_ready():
     bot.add_view(TicketActionView())
     await restore_ticket_panels(bot)
 
-    # Connect to Lavalink nodes
+    # Connect to Lavalink nodes (must be created inside async context)
     try:
-        await wavelink.Pool.connect(nodes=LAVALINK_NODES, client=bot)
+        nodes = [wavelink.Node(uri=c["uri"], password=c["password"]) for c in LAVALINK_NODE_CONFIGS]
+        await wavelink.Pool.connect(nodes=nodes, client=bot)
         print("Connected to Lavalink")
     except Exception as e:
         print(f"Lavalink connection failed: {e}")
