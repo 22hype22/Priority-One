@@ -1,6 +1,7 @@
 import io
 import re
 import asyncio
+import typing
 import discord
 from discord.ext import commands
 from discord import app_commands
@@ -10,7 +11,7 @@ import os
 import traceback
 import spotipy
 from spotipy.oauth2 import SpotifyClientCredentials
-import yt_dlp
+import wavelink
 
 TOKEN = os.getenv("DISCORD_TOKEN")
 
@@ -51,32 +52,19 @@ sp = spotipy.Spotify(auth_manager=SpotifyClientCredentials(
     client_secret=os.getenv("SPOTIFY_CLIENT_SECRET"),
 ))
 
-# yt-dlp options for audio streaming
-YTDL_OPTIONS = {
-    "format": "bestaudio/best",
-    "noplaylist": True,
-    "quiet": True,
-    "no_warnings": True,
-    "default_search": "ytsearch",
-    "source_address": "0.0.0.0",
-    "cookiefile": "cookies.txt",
-    "check_formats": False,
-    "extractor_args": {
-        "youtube": {
-            "player_client": ["ios"],
-        }
-    },
-}
-
-import shutil as _shutil
-FFMPEG_PATH = _shutil.which("ffmpeg") or "ffmpeg"
-FFMPEG_OPTIONS = {
-    "executable": FFMPEG_PATH,
-    "before_options": "-reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 5",
-    "options": "-vn",
-}
-
-ytdl = yt_dlp.YoutubeDL(YTDL_OPTIONS)
+# Lavalink nodes — free public nodes with YouTube support
+LAVALINK_NODES = [
+    # Primary — 99.99% uptime
+    wavelink.Node(
+        uri="http://lavalink.jirayu.net:13592",
+        password="youshallnotpass",
+    ),
+    # Backup
+    wavelink.Node(
+        uri="http://lava.g3v.co.uk:9008",
+        password="lavalinklol",
+    ),
+]
 
 intents = discord.Intents.default()
 intents.message_content = True
@@ -689,114 +677,28 @@ async def ticket_error(interaction: discord.Interaction, error: app_commands.App
 # ======================
 # MUSIC SYSTEM
 # ======================
-# /play  — paste a Spotify playlist URL or a song name
-# /skip  — skip current song
+# /play     — Spotify playlist URL or song name
+# /skip     — skip current song
 # /previous — go back to previous song
-# /stop  — stop and disconnect
+# /stop     — stop and disconnect
 #
-# Bot plays audio via YouTube, sourced from Spotify playlist metadata.
-# Leaves voice channel when the queue is empty.
+# Uses Lavalink (free public node) for YouTube streaming.
+# Spotify playlists are resolved via Spotify API then searched on YouTube.
 
-# Per-guild music state
-music_queues = {}      # guild_id -> list of {"title": str, "url": str}
-music_history = {}     # guild_id -> list of {"title": str, "url": str}
-music_current = {}     # guild_id -> {"title": str, "url": str} | None
+# Track history per guild for /previous
+music_history: dict[int, list[wavelink.Playable]] = {}
 
-
-def get_queue(guild_id):
-    if guild_id not in music_queues:
-        music_queues[guild_id] = []
-    return music_queues[guild_id]
-
-def get_history(guild_id):
+def get_history(guild_id: int) -> list:
     if guild_id not in music_history:
         music_history[guild_id] = []
     return music_history[guild_id]
-
-
-async def fetch_youtube_url(search: str) -> dict | None:
-    """Search YouTube for a track and return its stream URL and title."""
-    loop = asyncio.get_event_loop()
-    try:
-        data = await loop.run_in_executor(
-            None,
-            lambda: ytdl.extract_info(f"ytsearch:{search}", download=False)
-        )
-        if not data or "entries" not in data or not data["entries"]:
-            print(f"[music] No entries found for: {search}")
-            return None
-        entry = data["entries"][0]
-        # Try to get best audio URL from formats list
-        url = None
-        formats = entry.get("formats", [])
-        # Prefer audio-only formats
-        audio_formats = [f for f in formats if f.get("acodec") != "none" and f.get("vcodec") == "none"]
-        if audio_formats:
-            url = audio_formats[-1].get("url")
-        # Fall back to any format with audio
-        if not url:
-            any_audio = [f for f in formats if f.get("acodec") != "none"]
-            if any_audio:
-                url = any_audio[-1].get("url")
-        # Last resort: direct url field
-        if not url:
-            url = entry.get("url")
-        if not url:
-            print(f"[music] No URL found for: {search}")
-            return None
-        return {"title": entry.get("title", search), "url": url}
-    except Exception as e:
-        print(f"[music] fetch_youtube_url error for '{search}': {type(e).__name__}: {e}")
-        return None
-
-
-async def play_next(guild: discord.Guild, voice_client: discord.VoiceClient, text_channel):
-    """Play the next song in the queue, or disconnect if empty."""
-    guild_id = guild.id
-    queue = get_queue(guild_id)
-
-    if not queue:
-        music_current[guild_id] = None
-        await asyncio.sleep(1)
-        if voice_client.is_connected():
-            await voice_client.disconnect()
-        return
-
-    track = queue.pop(0)
-    music_current[guild_id] = track
-    get_history(guild_id).append(track)
-
-    try:
-        source = discord.FFmpegPCMAudio(track["url"], **FFMPEG_OPTIONS)
-        source = discord.PCMVolumeTransformer(source, volume=0.5)
-
-        def after_playing(error):
-            if error:
-                print(f"Player error: {error}")
-            fut = asyncio.run_coroutine_threadsafe(
-                play_next(guild, voice_client, text_channel),
-                voice_client.loop,
-            )
-            try:
-                fut.result()
-            except Exception as e:
-                print(f"Error in after_playing: {e}")
-
-        voice_client.play(source, after=after_playing)
-        await text_channel.send(f"🎵 Now playing: **{track['title']}**")
-
-    except Exception as e:
-        await text_channel.send(f"❌ Failed to play **{track['title']}**: {e}")
-        await play_next(guild, voice_client, text_channel)
 
 
 async def get_spotify_tracks(playlist_url: str) -> list[str]:
     """Extract track search strings from a Spotify playlist URL."""
     loop = asyncio.get_event_loop()
     try:
-        # Extract playlist ID from URL
         playlist_id = playlist_url.split("/playlist/")[-1].split("?")[0]
-
         tracks = []
         offset = 0
         while True:
@@ -816,11 +718,33 @@ async def get_spotify_tracks(playlist_url: str) -> list[str]:
             if not results.get("next"):
                 break
             offset += 50
-
         return tracks
     except Exception as e:
         print(f"Spotify error: {e}")
         return []
+
+
+@bot.event
+async def on_wavelink_track_start(payload: wavelink.TrackStartEventPayload):
+    """Called when a track starts playing — log to history."""
+    player = payload.player
+    if player and player.guild:
+        hist = get_history(player.guild.id)
+        hist.append(payload.track)
+
+
+@bot.event
+async def on_wavelink_track_end(payload: wavelink.TrackEndEventPayload):
+    """Called when a track ends — play next if queue has items."""
+    player = payload.player
+    if not player:
+        return
+    if player.queue.is_empty:
+        await asyncio.sleep(1)
+        await player.disconnect()
+    else:
+        next_track = player.queue.get()
+        await player.play(next_track)
 
 
 @tree.command(name="play", description="Play a Spotify playlist or search for a song")
@@ -834,17 +758,14 @@ async def play_command(interaction: discord.Interaction, query: str):
     await interaction.response.defer()
 
     guild = interaction.guild
-    guild_id = guild.id
     voice_channel = interaction.user.voice.channel
 
-    # Connect or move to voice channel
-    voice_client = guild.voice_client
-    if voice_client is None:
-        voice_client = await voice_channel.connect()
-    elif voice_client.channel != voice_channel:
-        await voice_client.move_to(voice_channel)
-
-    queue = get_queue(guild_id)
+    # Get or create wavelink player
+    player = typing.cast(wavelink.Player, guild.voice_client)
+    if player is None:
+        player = await voice_channel.connect(cls=wavelink.Player)
+    elif player.channel != voice_channel:
+        await player.move_to(voice_channel)
 
     # Spotify playlist
     if "spotify.com/playlist" in query:
@@ -853,91 +774,94 @@ async def play_command(interaction: discord.Interaction, query: str):
         if not track_names:
             return await interaction.followup.send("❌ Couldn't load that playlist. Make sure it's public.")
 
-        await interaction.followup.send(f"⏳ Loading **{len(track_names)}** tracks, this may take a moment...")
+        await interaction.followup.send(f"⏳ Searching **{len(track_names)}** tracks...")
 
         loaded = 0
+        first_track = None
         for name in track_names:
-            track = await fetch_youtube_url(name)
-            if track:
-                queue.append(track)
-                loaded += 1
+            try:
+                results = await wavelink.Playable.search(name)
+                if results:
+                    track = results[0]
+                    if not player.playing and first_track is None:
+                        first_track = track
+                    else:
+                        await player.queue.put_wait(track)
+                    loaded += 1
+            except Exception:
+                pass
+
+        if first_track:
+            await player.play(first_track)
 
         await interaction.followup.send(f"✅ Added **{loaded}** tracks to the queue.")
 
     else:
         # Single song search
-        track = await fetch_youtube_url(query)
-        if not track:
-            return await interaction.followup.send("❌ Couldn't find that song on YouTube.")
-        queue.append(track)
-        await interaction.followup.send(f"✅ Added **{track['title']}** to the queue.")
+        try:
+            results = await wavelink.Playable.search(query)
+        except Exception as e:
+            return await interaction.followup.send(f"❌ Search failed: {e}")
 
-    # Start playing if not already
-    if not voice_client.is_playing() and not voice_client.is_paused():
-        await play_next(guild, voice_client, interaction.channel)
+        if not results:
+            return await interaction.followup.send("❌ Couldn't find that song.")
+
+        track = results[0]
+        if player.playing:
+            await player.queue.put_wait(track)
+            await interaction.followup.send(f"✅ Added **{track.title}** to the queue.")
+        else:
+            await player.play(track)
+            await interaction.followup.send(f"🎵 Now playing: **{track.title}**")
 
 
 @tree.command(name="skip", description="Skip the current song")
 async def skip_command(interaction: discord.Interaction):
-    voice_client = interaction.guild.voice_client
-    if not voice_client or not voice_client.is_playing():
+    player = typing.cast(wavelink.Player, interaction.guild.voice_client)
+    if not player or not player.playing:
         return await interaction.response.send_message(
             "❌ Nothing is playing.", ephemeral=True
         )
-    voice_client.stop()
+    await player.skip()
     await interaction.response.send_message("⏭️ Skipped.")
 
 
 @tree.command(name="previous", description="Play the previous song")
 async def previous_command(interaction: discord.Interaction):
     guild = interaction.guild
-    guild_id = guild.id
-    history = get_history(guild_id)
-    queue = get_queue(guild_id)
-    voice_client = guild.voice_client
+    player = typing.cast(wavelink.Player, guild.voice_client)
 
-    if not voice_client:
+    if not player:
         return await interaction.response.send_message(
             "❌ Not in a voice channel.", ephemeral=True
         )
 
-    # Need at least 2 in history: current + one before
-    if len(history) < 2:
+    hist = get_history(guild.id)
+    if len(hist) < 2:
         return await interaction.response.send_message(
             "❌ No previous song.", ephemeral=True
         )
 
-    # Put current back at front of queue, go back to previous
-    current = music_current.get(guild_id)
-    if current:
-        queue.insert(0, current)
-
-    prev = history[-2]
-    queue.insert(0, prev)
-    # Trim history so we don't double-add
-    music_history[guild_id] = history[:-2]
-
-    voice_client.stop()
-    await interaction.response.send_message(f"⏮️ Going back to **{prev['title']}**.")
+    # Go back two (current is last in history)
+    prev = hist[-2]
+    music_history[guild.id] = hist[:-2]
+    await player.play(prev)
+    await interaction.response.send_message(f"⏮️ Going back to **{prev.title}**.")
 
 
 @tree.command(name="stop", description="Stop music and disconnect")
 async def stop_command(interaction: discord.Interaction):
-    guild_id = interaction.guild.id
-    voice_client = interaction.guild.voice_client
+    player = typing.cast(wavelink.Player, interaction.guild.voice_client)
 
-    if not voice_client:
+    if not player:
         return await interaction.response.send_message(
             "❌ Not in a voice channel.", ephemeral=True
         )
 
-    # Clear state
-    music_queues[guild_id] = []
-    music_history[guild_id] = []
-    music_current[guild_id] = None
-
-    voice_client.stop()
-    await voice_client.disconnect()
+    music_history[interaction.guild.id] = []
+    player.queue.clear()
+    await player.stop()
+    await player.disconnect()
     await interaction.response.send_message("⏹️ Stopped and disconnected.")
 
 # ======================
@@ -971,6 +895,13 @@ async def on_ready():
     # Re-register persistent views so buttons work after restarts
     bot.add_view(TicketActionView())
     await restore_ticket_panels(bot)
+
+    # Connect to Lavalink nodes
+    try:
+        await wavelink.Pool.connect(nodes=LAVALINK_NODES, client=bot)
+        print("Connected to Lavalink")
+    except Exception as e:
+        print(f"Lavalink connection failed: {e}")
 
     try:
         print(f"Commands in tree: {[c.name for c in tree.get_commands()]}")
