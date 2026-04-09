@@ -90,49 +90,7 @@ def save_links(data):
     with open(LINKS_FILE, "w", encoding="utf-8") as f:
         json.dump(data, f, indent=2)
 
-def parse_say_fields(message: str) -> dict:
-    fields = {
-        "author": [],
-        "title": [],
-        "desc": [],
-        "footer": [],
-        "banner": [],
-    }
-    KEY_ALIASES = {
-        "author": "author", "a": "author",
-        "title": "title",   "t": "title",
-        "desc": "desc",     "description": "desc", "d": "desc",
-        "footer": "footer", "f": "footer",
-        "banner": "banner", "b": "banner",
-    }
-    current_key = None
 
-    for raw_line in message.splitlines():
-        line = raw_line.rstrip()
-
-        if not line.strip():
-            current_key = None
-            continue
-
-        if raw_line.startswith((" ", "\t")) and current_key:
-            fields[current_key].append(raw_line.strip())
-            continue
-
-        if "=" in line:
-            key_raw, value = line.split("=", 1)
-            key = key_raw.strip().lower()
-            value = value.strip()
-
-            if key in KEY_ALIASES:
-                current_key = KEY_ALIASES[key]
-                if value:
-                    fields[current_key] = [value]
-                else:
-                    fields[current_key] = []
-            else:
-                current_key = None
-
-    return {k: "\n".join(v) if v else None for k, v in fields.items()}
 
 
 async def fetch_image_bytes(url: str, session: aiohttp.ClientSession):
@@ -146,28 +104,7 @@ async def fetch_image_bytes(url: str, session: aiohttp.ClientSession):
         return data, filename
 
 
-async def resolve_banner(ctx, fields: dict, session: aiohttp.ClientSession):
-    if ctx.message.attachments:
-        att = ctx.message.attachments[0]
-        try:
-            data, filename = await fetch_image_bytes(att.url, session)
-            buf = io.BytesIO(data)
-            buf.seek(0)
-            return discord.File(fp=buf, filename=filename)
-        except Exception as e:
-            raise RuntimeError(f"Failed to download attachment: {e}")
 
-    if fields.get("banner"):
-        url = fields["banner"].strip()
-        try:
-            data, filename = await fetch_image_bytes(url, session)
-            buf = io.BytesIO(data)
-            buf.seek(0)
-            return discord.File(fp=buf, filename=filename)
-        except Exception as e:
-            raise RuntimeError(f"Failed to download banner URL: {e}")
-
-    return None
 
 
 # ======================
@@ -249,91 +186,94 @@ async def update(ctx):
 # ======================
 # SAY COMMAND
 # ======================
-# !say          — plain text
-# !say embed    — embedded message
-#
-# Fields: author=, title=, desc=/description=, footer=, banner=
-# Attach a file or paste a URL for banner. Attachment wins over URL.
+# /say — post a plain or embedded message as the bot
+# All fields optional. Attach an image for banner or paste a URL.
 
-@bot.command()
-@commands.has_permissions(administrator=True)
-async def say(ctx):
-    after_cmd = ctx.message.content[len(ctx.prefix + ctx.invoked_with):].strip()
+@tree.command(name="say", description="Post a message as the bot (admin only)")
+@app_commands.describe(
+    mode="plain (default) or embed",
+    title="Title of the message",
+    author="Author name shown above title (embed only)",
+    desc="Main body text",
+    footer="Footer text (embed only)",
+    banner="Banner image URL (or attach an image)",
+)
+async def say_command(
+    interaction: discord.Interaction,
+    mode: str = "plain",
+    title: str = None,
+    author: str = None,
+    desc: str = None,
+    footer: str = None,
+    banner: str = None,
+):
+    if not interaction.user.guild_permissions.administrator:
+        return await interaction.response.send_message(
+            "❌ You don't have permission to use this.", ephemeral=True
+        )
 
-    tokens = after_cmd.split(None, 1)
-    first = tokens[0].lower() if tokens else ""
+    use_embed = mode.lower() == "embed"
+    channel = interaction.channel
 
-    if first == "embed":
-        use_embed = True
-        message = tokens[1].strip() if len(tokens) > 1 else ""
-    else:
-        use_embed = False
-        message = after_cmd
+    await interaction.response.defer(ephemeral=True)
 
-    channel = ctx.channel
+    # Resolve banner from URL if provided
+    banner_file = None
+    if banner:
+        async with aiohttp.ClientSession() as session:
+            try:
+                data, filename = await fetch_image_bytes(banner, session)
+                buf = io.BytesIO(data)
+                buf.seek(0)
+                banner_file = discord.File(fp=buf, filename=filename)
+            except Exception as e:
+                return await interaction.followup.send(
+                    f"❌ Failed to fetch banner: {e}", ephemeral=True
+                )
 
-    async with aiohttp.ClientSession() as session:
-        fields = parse_say_fields(message)
-
-        try:
-            banner_file = await resolve_banner(ctx, fields, session)
-        except RuntimeError as e:
-            return await ctx.reply(f"❌ {e}", mention_author=False)
-
-        try:
-            await ctx.message.delete()
-        except discord.Forbidden:
-            return await ctx.reply(
-                "❌ I need **Manage Messages** to delete your command.",
-                mention_author=False,
-            )
-
-        try:
-            if use_embed:
-                embed = discord.Embed(color=EMBED_COLOR)
-                if fields["title"]:
-                    embed.title = fields["title"]
-                if fields["desc"]:
-                    embed.description = fields["desc"]
-                if fields["author"]:
-                    embed.set_author(name=fields["author"])
-                if fields["footer"]:
-                    embed.set_footer(text=fields["footer"])
-                if banner_file:
-                    embed.set_image(url=f"attachment://{banner_file.filename}")
-                    if not any([fields["title"], fields["desc"], fields["author"], fields["footer"]]):
-                        embed.description = "\u200b"
-                    await channel.send(file=banner_file, embed=embed)
-                else:
-                    await channel.send(embed=embed)
-
+    try:
+        if use_embed:
+            embed = discord.Embed(color=EMBED_COLOR)
+            if title:
+                embed.title = title
+            if desc:
+                embed.description = desc
+            if author:
+                embed.set_author(name=author)
+            if footer:
+                embed.set_footer(text=footer)
+            if banner_file:
+                embed.set_image(url=f"attachment://{banner_file.filename}")
+                if not any([title, desc, author, footer]):
+                    embed.description = "\u200b"
+                await channel.send(file=banner_file, embed=embed)
             else:
-                lines = []
-                if fields["author"]:
-                    lines.append(f"**{fields['author']}**")
-                if fields["title"]:
-                    lines.append(f"**{fields['title']}**")
-                if fields["desc"]:
-                    lines.append(fields["desc"])
-                if fields["footer"]:
-                    lines.append(f"-# {fields['footer']}")
+                await channel.send(embed=embed)
 
-                text = "\n".join(lines) if lines else None
-                if text:
-                    await channel.send(text)
-                if banner_file:
-                    await channel.send(file=banner_file)
+        else:
+            lines = []
+            if author:
+                lines.append(f"**{author}**")
+            if title:
+                lines.append(f"**{title}**")
+            if desc:
+                lines.append(desc)
+            if footer:
+                lines.append(f"-# {footer}")
 
-        except Exception as e:
-            traceback.print_exc()
-            await channel.send(
-                f"❌ Failed to post: `{type(e).__name__}: {str(e)[:180]}`"
-            )
+            text = "\n".join(lines) if lines else None
+            if text:
+                await channel.send(text)
+            if banner_file:
+                await channel.send(file=banner_file)
 
-@say.error
-async def say_error(ctx, error):
-    if isinstance(error, commands.MissingPermissions):
-        await ctx.reply("❌ You don't have permission to use this.", mention_author=False)
+    except Exception as e:
+        traceback.print_exc()
+        return await interaction.followup.send(
+            f"❌ Failed to post: `{type(e).__name__}: {str(e)[:180]}`", ephemeral=True
+        )
+
+    await interaction.followup.send("✅ Posted.", ephemeral=True)
 
 
 # ======================
