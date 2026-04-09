@@ -53,7 +53,7 @@ sp = spotipy.Spotify(auth_manager=SpotifyClientCredentials(
 
 # yt-dlp options for audio streaming
 YTDL_OPTIONS = {
-    "format": "bestaudio[ext=webm]/bestaudio[ext=m4a]/bestaudio/best",
+    "format": "bestaudio/best",
     "noplaylist": True,
     "quiet": True,
     "no_warnings": True,
@@ -62,11 +62,8 @@ YTDL_OPTIONS = {
     "cookiefile": "cookies.txt",
     "extractor_args": {
         "youtube": {
-            "player_client": ["android"],
+            "player_client": ["web"],
         }
-    },
-    "http_headers": {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
     },
 }
 
@@ -728,7 +725,25 @@ async def fetch_youtube_url(search: str) -> dict | None:
             print(f"[music] No entries found for: {search}")
             return None
         entry = data["entries"][0]
-        return {"title": entry.get("title", search), "url": entry["url"]}
+        # Try to get best audio URL from formats list
+        url = None
+        formats = entry.get("formats", [])
+        # Prefer audio-only formats
+        audio_formats = [f for f in formats if f.get("acodec") != "none" and f.get("vcodec") == "none"]
+        if audio_formats:
+            url = audio_formats[-1].get("url")
+        # Fall back to any format with audio
+        if not url:
+            any_audio = [f for f in formats if f.get("acodec") != "none"]
+            if any_audio:
+                url = any_audio[-1].get("url")
+        # Last resort: direct url field
+        if not url:
+            url = entry.get("url")
+        if not url:
+            print(f"[music] No URL found for: {search}")
+            return None
+        return {"title": entry.get("title", search), "url": url}
     except Exception as e:
         print(f"[music] fetch_youtube_url error for '{search}': {type(e).__name__}: {e}")
         return None
