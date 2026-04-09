@@ -60,9 +60,10 @@ YTDL_OPTIONS = {
     "default_search": "ytsearch",
     "source_address": "0.0.0.0",
     "cookiefile": "cookies.txt",
+    "check_formats": False,
     "extractor_args": {
         "youtube": {
-            "player_client": ["web"],
+            "player_client": ["ios"],
         }
     },
 }
