@@ -55,7 +55,6 @@ sp = spotipy.Spotify(auth_manager=SpotifyClientCredentials(
 # Lavalink node config — nodes are created inside on_ready to avoid event loop issues
 LAVALINK_NODE_CONFIGS = [
     {"uri": "http://lavalink.jirayu.net:13592", "password": "youshallnotpass"},
-    {"uri": "http://lava.g3v.co.uk:9008", "password": "lavalinklol"},
 ]
 
 intents = discord.Intents.default()
@@ -755,7 +754,15 @@ async def play_command(interaction: discord.Interaction, query: str):
     # Get or create wavelink player
     player = typing.cast(wavelink.Player, guild.voice_client)
     if player is None:
-        player = await voice_channel.connect(cls=wavelink.Player)
+        try:
+            player = await asyncio.wait_for(
+                voice_channel.connect(cls=wavelink.Player),
+                timeout=20.0
+            )
+        except asyncio.TimeoutError:
+            return await interaction.followup.send("❌ Timed out connecting to voice channel. Try again.")
+        except Exception as e:
+            return await interaction.followup.send(f"❌ Failed to join voice channel: {e}")
     elif player.channel != voice_channel:
         await player.move_to(voice_channel)
 
@@ -769,24 +776,21 @@ async def play_command(interaction: discord.Interaction, query: str):
         await interaction.followup.send(f"⏳ Searching **{len(track_names)}** tracks...")
 
         loaded = 0
-        first_track = None
         for name in track_names:
             try:
                 results = await wavelink.Playable.search(name)
                 if results:
-                    track = results[0]
-                    if not player.playing and first_track is None:
-                        first_track = track
-                    else:
-                        await player.queue.put_wait(track)
+                    await player.queue.put_wait(results[0])
                     loaded += 1
             except Exception:
                 pass
 
-        if first_track:
-            await player.play(first_track)
-
         await interaction.followup.send(f"✅ Added **{loaded}** tracks to the queue.")
+
+        # Start playing if not already
+        if not player.playing and not player.queue.is_empty:
+            track = player.queue.get()
+            await player.play(track)
 
     else:
         # Single song search
