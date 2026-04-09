@@ -187,48 +187,65 @@ async def update(ctx):
 # SAY COMMAND
 # ======================
 # /say — post a plain or embedded message as the bot
-# All fields optional. Attach an image for banner or paste a URL.
+# mode: choose Plain or Embed from dropdown
+# All other fields optional. Banner accepts a file attachment or URL.
+
+class SayModeChoice(str, discord.Enum):
+    plain = "plain"
+    embed = "embed"
 
 @tree.command(name="say", description="Post a message as the bot (admin only)")
 @app_commands.describe(
-    mode="plain (default) or embed",
+    mode="Choose Plain or Embed",
     title="Title of the message",
-    author="Author name shown above title (embed only)",
+    author="Author name (embed only)",
     desc="Main body text",
     footer="Footer text (embed only)",
-    banner="Banner image URL (or attach an image)",
+    banner="Attach an image file for the banner",
+    banner_url="Or paste a banner image URL instead",
 )
 async def say_command(
     interaction: discord.Interaction,
-    mode: str = "plain",
+    mode: SayModeChoice = SayModeChoice.plain,
     title: str = None,
     author: str = None,
     desc: str = None,
     footer: str = None,
-    banner: str = None,
+    banner: discord.Attachment = None,
+    banner_url: str = None,
 ):
     if not interaction.user.guild_permissions.administrator:
         return await interaction.response.send_message(
             "❌ You don't have permission to use this.", ephemeral=True
         )
 
-    use_embed = mode.lower() == "embed"
+    use_embed = mode == SayModeChoice.embed
     channel = interaction.channel
 
     await interaction.response.defer(ephemeral=True)
 
-    # Resolve banner from URL if provided
+    # Resolve banner — attachment takes priority over URL
     banner_file = None
-    if banner:
-        async with aiohttp.ClientSession() as session:
+    async with aiohttp.ClientSession() as session:
+        if banner:
             try:
-                data, filename = await fetch_image_bytes(banner, session)
+                data, filename = await fetch_image_bytes(banner.url, session)
                 buf = io.BytesIO(data)
                 buf.seek(0)
                 banner_file = discord.File(fp=buf, filename=filename)
             except Exception as e:
                 return await interaction.followup.send(
-                    f"❌ Failed to fetch banner: {e}", ephemeral=True
+                    f"❌ Failed to fetch banner attachment: {e}", ephemeral=True
+                )
+        elif banner_url:
+            try:
+                data, filename = await fetch_image_bytes(banner_url, session)
+                buf = io.BytesIO(data)
+                buf.seek(0)
+                banner_file = discord.File(fp=buf, filename=filename)
+            except Exception as e:
+                return await interaction.followup.send(
+                    f"❌ Failed to fetch banner URL: {e}", ephemeral=True
                 )
 
     try:
