@@ -757,19 +757,54 @@ class UpdateBuilderView(discord.ui.View):
         await interaction.channel.send(embed=embed)
 
 
+class UpdateTypeChoice(str, discord.Enum):
+    new   = "New"
+    fix   = "Fix"
+    patch = "Patch"
+
 @tree.command(name="gameupdate", description="Post a SkyHarvest game update (admin only)")
-async def gameupdate_command(interaction: discord.Interaction):
+@app_commands.describe(
+    type="Type of update",
+    text="Description of the update",
+)
+async def gameupdate_command(
+    interaction: discord.Interaction,
+    type: UpdateTypeChoice,
+    text: str,
+):
     if not interaction.user.guild_permissions.administrator:
         return await interaction.response.send_message(
             "❌ You don't have permission to use this.", ephemeral=True
         )
 
-    view = UpdateBuilderView(author_id=interaction.user.id)
-    await interaction.response.send_message(
-        content="**No entries yet.** Add some updates below.",
-        view=view,
-        ephemeral=True,
+    order = {"New": 0, "Fix": 1, "Patch": 2}
+    today = datetime.date.today().strftime("%B %-d, %Y")
+
+    updates = load_updates()
+    existing = next((u for u in updates if u["date"] == today), None)
+    if existing:
+        existing["fixes"].append({"type": type.value, "text": text})
+        existing["fixes"] = sorted(
+            existing["fixes"], key=lambda e: order.get(e["type"], 99)
+        )
+    else:
+        updates.insert(0, {
+            "date": today,
+            "fixes": [{"type": type.value, "text": text}],
+        })
+
+    save_updates(updates)
+
+    emoji = {"New": "🟡", "Fix": "🟢", "Patch": "🟠"}.get(type.value, "⚪")
+
+    embed = discord.Embed(
+        title=f"🛠️ SkyHarvest Update — {today}",
+        color=discord.Color.from_str("#ec9206"),
     )
+    embed.description = f"{emoji} **{type.value}** — {text}"
+    embed.set_footer(text=f"Posted by {interaction.user.display_name}")
+
+    await interaction.response.send_message(embed=embed)
 
 
 # ======================
