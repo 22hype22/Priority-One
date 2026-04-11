@@ -48,6 +48,9 @@ EMBED_COLOR = discord.Color.from_str("#181818")
 
 TICKET_STAFF_ROLE_ID = 1126332043517767690
 
+GITHUB_TOKEN = os.getenv("GITHUB_TOKEN")
+GIST_ID = os.getenv("GIST_ID")
+
 sp = spotipy.Spotify(auth_manager=SpotifyClientCredentials(
     client_id=os.getenv("SPOTIFY_CLIENT_ID"),
     client_secret=os.getenv("SPOTIFY_CLIENT_SECRET"),
@@ -79,15 +82,34 @@ def save_links(data):
     with open(LINKS_FILE, "w", encoding="utf-8") as f:
         json.dump(data, f, indent=2)
 
-def load_updates():
-    if not os.path.exists(UPDATES_FILE):
+async def load_updates_async():
+    if not GITHUB_TOKEN or not GIST_ID:
         return []
-    with open(UPDATES_FILE, "r", encoding="utf-8") as f:
-        return json.load(f)
+    try:
+        async with aiohttp.ClientSession() as session:
+            async with session.get(
+                f"https://api.github.com/gists/{GIST_ID}",
+                headers={"Authorization": f"token {GITHUB_TOKEN}"}
+            ) as resp:
+                data = await resp.json()
+                content = data["files"]["game_updates.json"]["content"]
+                return json.loads(content)
+    except Exception as e:
+        print(f"Failed to load updates: {e}")
+        return []
 
-def save_updates(data):
-    with open(UPDATES_FILE, "w", encoding="utf-8") as f:
-        json.dump(data, f, indent=2)
+async def save_updates_async(data):
+    if not GITHUB_TOKEN or not GIST_ID:
+        return
+    try:
+        async with aiohttp.ClientSession() as session:
+            await session.patch(
+                f"https://api.github.com/gists/{GIST_ID}",
+                headers={"Authorization": f"token {GITHUB_TOKEN}"},
+                json={"files": {"game_updates.json": {"content": json.dumps(data, indent=2)}}}
+            )
+    except Exception as e:
+        print(f"Failed to save updates: {e}")
 
 async def fetch_image_bytes(url: str, session: aiohttp.ClientSession):
     async with session.get(url) as resp:
@@ -724,7 +746,7 @@ class UpdateBuilderView(discord.ui.View):
 
         today = datetime.date.today().strftime("%B %-d, %Y")
 
-        updates = load_updates()
+        updates = await load_updates_async()
         existing = next((u for u in updates if u["date"] == today), None)
         if existing:
             existing["fixes"].extend(sorted_entries)
@@ -737,7 +759,7 @@ class UpdateBuilderView(discord.ui.View):
                 "fixes": sorted_entries,
             })
 
-        save_updates(updates)
+        await save_updates_async(updates)
 
         for child in self.children:
             child.disabled = True
@@ -786,7 +808,7 @@ async def clearupdate_command(
             "❌ You don't have permission to use this.", ephemeral=True
         )
 
-    updates = load_updates()
+    updates = await load_updates_async()
     found = False
 
     for group in updates:
@@ -798,7 +820,7 @@ async def clearupdate_command(
             break
 
     updates = [g for g in updates if g["fixes"]]
-    save_updates(updates)
+    await save_updates_async(updates)
 
     if found:
         await interaction.response.send_message(
@@ -815,7 +837,7 @@ async def clearupdate_command(
 # ======================
 
 async def handle_updates(request):
-    updates = load_updates()
+    updates = await load_updates_async()
     return web.json_response(updates)
 
 async def start_http_server():
