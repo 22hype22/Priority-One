@@ -795,16 +795,19 @@ async def gameupdate_command(
 
     save_updates(updates)
 
-    emoji = {"New": "🟡", "Fix": "🟢", "Patch": "🟠"}.get(type.value, "⚪")
+    updates = load_updates()
+    update_number = sum(len(g["fixes"]) for g in updates)
+    todays = next((u for u in updates if u["date"] == today), None)
+    all_fixes = todays["fixes"] if todays else []
 
-    embed = discord.Embed(
-        title=f"🛠️ SkyHarvest Update — {today}",
-        color=discord.Color.from_str("#ec9206"),
-    )
-    embed.description = f"{emoji} **{type.value}** — {text}"
-    embed.set_footer(text=f"Posted by {interaction.user.display_name}")
+    lines = []
+    for e in all_fixes:
+        tag = f"`{e['type'].upper()}`"
+        lines.append(f"- {tag} | {e['text']}")
 
-    await interaction.response.send_message(embed=embed)
+    message = f"**DEVELOPMENT UPDATE | {update_number}**\n" + "\n".join(lines)
+
+    await interaction.response.send_message(message)
 
 
 # ======================
