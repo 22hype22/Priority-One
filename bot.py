@@ -1053,7 +1053,6 @@ async def on_ready():
 
     try:
         print(f"Commands in tree: {[c.name for c in tree.get_commands()]}")
-        tree.clear_commands(guild=None)
         synced = await tree.sync()
         print(f"Synced {len(synced)} slash command(s) globally")
     except Exception as e:
