@@ -9,9 +9,11 @@ import aiohttp
 import json
 import os
 import traceback
+import datetime
 import spotipy
 from spotipy.oauth2 import SpotifyClientCredentials
 import wavelink
+from aiohttp import web
 
 TOKEN = os.getenv("DISCORD_TOKEN")
 
@@ -41,18 +43,16 @@ ROBLOX_TO_DISCORD_ROLE = {
 }
 
 LINKS_FILE = "roblox_links.json"
+UPDATES_FILE = "game_updates.json"
 EMBED_COLOR = discord.Color.from_str("#181818")
 
-# Role that can manage tickets (Community Management)
 TICKET_STAFF_ROLE_ID = 1126332043517767690
 
-# Spotify client
 sp = spotipy.Spotify(auth_manager=SpotifyClientCredentials(
     client_id=os.getenv("SPOTIFY_CLIENT_ID"),
     client_secret=os.getenv("SPOTIFY_CLIENT_SECRET"),
 ))
 
-# Lavalink node config — nodes are created inside on_ready to avoid event loop issues
 LAVALINK_NODE_CONFIGS = [
     {"uri": "http://lavalink.jirayu.net:13592", "password": "youshallnotpass"},
 ]
@@ -79,8 +79,15 @@ def save_links(data):
     with open(LINKS_FILE, "w", encoding="utf-8") as f:
         json.dump(data, f, indent=2)
 
+def load_updates():
+    if not os.path.exists(UPDATES_FILE):
+        return []
+    with open(UPDATES_FILE, "r", encoding="utf-8") as f:
+        return json.load(f)
 
-
+def save_updates(data):
+    with open(UPDATES_FILE, "w", encoding="utf-8") as f:
+        json.dump(data, f, indent=2)
 
 async def fetch_image_bytes(url: str, session: aiohttp.ClientSession):
     async with session.get(url) as resp:
@@ -91,9 +98,6 @@ async def fetch_image_bytes(url: str, session: aiohttp.ClientSession):
         if "." not in filename:
             filename += ".png"
         return data, filename
-
-
-
 
 
 # ======================
@@ -175,9 +179,6 @@ async def update(ctx):
 # ======================
 # SAY COMMAND
 # ======================
-# /say — post a plain or embedded message as the bot
-# mode: choose Plain or Embed from dropdown
-# All other fields optional. Banner accepts a file attachment or URL.
 
 class SayModeChoice(str, discord.Enum):
     normal = "normal"
@@ -213,7 +214,6 @@ async def say_command(
 
     await interaction.response.defer(ephemeral=True)
 
-    # Resolve banner — attachment takes priority over URL
     banner_file = None
     async with aiohttp.ClientSession() as session:
         if banner:
@@ -255,7 +255,6 @@ async def say_command(
                 await channel.send(file=banner_file, embed=embed)
             else:
                 await channel.send(embed=embed)
-
         else:
             lines = []
             if author:
@@ -285,23 +284,14 @@ async def say_command(
 # ======================
 # TICKET SYSTEM
 # ======================
-# /ticket — slash command, admin only
-# Fields: title, description, banner (URL, optional), drop1–drop5
-# Users pick a category from the dropdown → private ticket channel created
-# Inside ticket: Claim button (staff only) + Close button (staff only)
-# Claim: locks channel to claimer + opener only (staff role loses send perms)
-# Close: locks channel for everyone
 
 class TicketDropdown(discord.ui.Select):
     def __init__(self, options: list, custom_messages: dict):
-        # options is a list of label strings
-        # custom_messages is {label: custom_text} for per-category messages
         self.custom_messages = custom_messages
         select_options = [
             discord.SelectOption(label=opt, value=opt)
             for opt in options
         ]
-        # Use a stable custom_id — options are encoded in the message embed
         super().__init__(
             placeholder="Select a category to open a ticket...",
             min_values=1,
@@ -312,16 +302,13 @@ class TicketDropdown(discord.ui.Select):
 
     @classmethod
     def from_message(cls, message: discord.Message):
-        """Rebuild dropdown from a ticket panel message's embed fields."""
         if not message.embeds:
             return None
         embed = message.embeds[0]
-        # Options and custom messages stored in embed footer as JSON
         if not embed.footer or not embed.footer.text:
             return None
         try:
-            import json as _json
-            data = _json.loads(embed.footer.text)
+            data = json.loads(embed.footer.text)
             options = data.get("options", [])
             custom_messages = data.get("messages", {})
             if not options:
@@ -336,7 +323,6 @@ class TicketDropdown(discord.ui.Select):
         user = interaction.user
         staff_role = guild.get_role(TICKET_STAFF_ROLE_ID)
 
-        # Check if user already has an open ticket for this specific category
         safe_name = re.sub(r"[^a-z0-9-]", "", user.name.lower().replace(" ", "-"))
         channel_name = f"ticket-{safe_name}"
         category_name = f"{category} Tickets"
@@ -349,8 +335,6 @@ class TicketDropdown(discord.ui.Select):
                     ephemeral=True,
                 )
 
-        # Find or create a category named "<Category> Tickets"
-        category_name = f"{category} Tickets"
         tickets_category = discord.utils.get(guild.categories, name=category_name)
         if not tickets_category:
             try:
@@ -361,7 +345,6 @@ class TicketDropdown(discord.ui.Select):
             except discord.Forbidden:
                 tickets_category = None
 
-        # Permission overwrites for new ticket channel
         overwrites = {
             guild.default_role: discord.PermissionOverwrite(view_channel=False),
             user: discord.PermissionOverwrite(
@@ -398,7 +381,6 @@ class TicketDropdown(discord.ui.Select):
                 ephemeral=True,
             )
 
-        # Build intro embed
         custom_msg = self.custom_messages.get(category, "")
         desc = f"Thanks for opening a ticket, {user.mention}!\n**Category:** {category}"
         if custom_msg:
@@ -456,7 +438,6 @@ class TicketActionView(discord.ui.View):
                 manage_channels=True,
                 read_message_history=True,
             ),
-            # Claimer gets full access
             interaction.user: discord.PermissionOverwrite(
                 view_channel=True,
                 send_messages=True,
@@ -464,7 +445,6 @@ class TicketActionView(discord.ui.View):
             ),
         }
 
-        # Staff role can view but not send — claimer handles it
         if staff_role:
             overwrites[staff_role] = discord.PermissionOverwrite(
                 view_channel=True,
@@ -472,7 +452,6 @@ class TicketActionView(discord.ui.View):
                 read_message_history=True,
             )
 
-        # Recover opener_id from channel topic if not set (e.g. after bot restart)
         opener_id = self.opener_id
         if not opener_id and channel.topic and channel.topic.startswith("opener:"):
             try:
@@ -530,7 +509,6 @@ class TicketActionView(discord.ui.View):
                 read_message_history=True,
             )
 
-        # Notify then delete after a short delay
         for child in self.children:
             child.disabled = True
         await interaction.response.edit_message(view=self)
@@ -540,7 +518,6 @@ class TicketActionView(discord.ui.View):
         await asyncio.sleep(5)
         await channel.delete(reason=f"Ticket closed by {interaction.user}")
 
-        # Delete the parent category if no ticket channels remain
         guild = interaction.guild
         parent = channel.category
         if parent and parent.name.endswith(" Tickets") and len(parent.channels) == 0:
@@ -591,14 +568,12 @@ async def ticket_command(
         )
     options = [o for o in [drop1, drop2, drop3, drop4, drop5] if o]
 
-    # Map each dropdown label to its custom message
     custom_messages = {}
     for label, msg in zip([drop1, drop2, drop3, drop4, drop5], [msg1, msg2, msg3, msg4, msg5]):
         if label and msg:
             custom_messages[label] = msg
 
-    import json as _json
-    footer_data = _json.dumps({"options": options, "messages": custom_messages})
+    footer_data = json.dumps({"options": options, "messages": custom_messages})
 
     embed = discord.Embed(
         title=title,
@@ -632,8 +607,6 @@ async def ticket_command(
 
 
 async def restore_ticket_panels(bot: commands.Bot):
-    """On startup, re-register persistent views for all ticket panel messages."""
-    import json as _json
     for guild in bot.guilds:
         for channel in guild.text_channels:
             try:
@@ -642,7 +615,7 @@ async def restore_ticket_panels(bot: commands.Bot):
                         embed = message.embeds[0]
                         if embed.footer and embed.footer.text:
                             try:
-                                data = _json.loads(embed.footer.text)
+                                data = json.loads(embed.footer.text)
                                 options = data.get("options", [])
                                 custom_messages = data.get("messages", {})
                                 if options:
@@ -664,19 +637,163 @@ async def ticket_error(interaction: discord.Interaction, error: app_commands.App
     )
 
 
+# ======================
+# GAME UPDATE SYSTEM
+# ======================
+
+class UpdateEntryModal(discord.ui.Modal, title="Add Update Entry"):
+    def __init__(self, update_type: str, entries: list, view: "UpdateBuilderView"):
+        super().__init__()
+        self.update_type = update_type
+        self.entries = entries
+        self.builder_view = view
+
+    text = discord.ui.TextInput(
+        label="Update description",
+        placeholder="Describe the update...",
+        max_length=200,
+    )
+
+    async def on_submit(self, interaction: discord.Interaction):
+        self.entries.append({
+            "type": self.update_type,
+            "text": self.text.value.strip(),
+        })
+        await interaction.response.edit_message(
+            content=self.builder_view.preview(),
+            view=self.builder_view,
+        )
+
+
+class UpdateBuilderView(discord.ui.View):
+    def __init__(self, author_id: int):
+        super().__init__(timeout=300)
+        self.author_id = author_id
+        self.entries: list[dict] = []
+
+    def preview(self) -> str:
+        if not self.entries:
+            return "**No entries yet.** Add some updates below."
+        lines = ["**Preview:**"]
+        for e in self.entries:
+            emoji = {"New": "🟡", "Fix": "🟢", "Patch": "🟠"}.get(e["type"], "⚪")
+            lines.append(f"{emoji} **{e['type']}** — {e['text']}")
+        return "\n".join(lines)
+
+    async def interaction_check(self, interaction: discord.Interaction) -> bool:
+        if interaction.user.id != self.author_id:
+            await interaction.response.send_message(
+                "This isn't your update builder.", ephemeral=True
+            )
+            return False
+        return True
+
+    @discord.ui.button(label="+ New", style=discord.ButtonStyle.success, row=0)
+    async def add_new(self, interaction: discord.Interaction, button: discord.ui.Button):
+        modal = UpdateEntryModal("New", self.entries, self)
+        await interaction.response.send_modal(modal)
+
+    @discord.ui.button(label="+ Fix", style=discord.ButtonStyle.danger, row=0)
+    async def add_fix(self, interaction: discord.Interaction, button: discord.ui.Button):
+        modal = UpdateEntryModal("Fix", self.entries, self)
+        await interaction.response.send_modal(modal)
+
+    @discord.ui.button(label="+ Patch", style=discord.ButtonStyle.secondary, row=0)
+    async def add_patch(self, interaction: discord.Interaction, button: discord.ui.Button):
+        modal = UpdateEntryModal("Patch", self.entries, self)
+        await interaction.response.send_modal(modal)
+
+    @discord.ui.button(label="↩ Undo Last", style=discord.ButtonStyle.secondary, row=1)
+    async def undo_last(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if self.entries:
+            self.entries.pop()
+        await interaction.response.edit_message(
+            content=self.preview(),
+            view=self,
+        )
+
+    @discord.ui.button(label="✅ Post Update", style=discord.ButtonStyle.primary, row=1)
+    async def post_update(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if not self.entries:
+            return await interaction.response.send_message(
+                "❌ Add at least one entry first.", ephemeral=True
+            )
+
+        order = {"New": 0, "Fix": 1, "Patch": 2}
+        sorted_entries = sorted(self.entries, key=lambda e: order.get(e["type"], 99))
+
+        today = datetime.date.today().strftime("%B %-d, %Y")
+
+        updates = load_updates()
+        existing = next((u for u in updates if u["date"] == today), None)
+        if existing:
+            existing["fixes"].extend(sorted_entries)
+            existing["fixes"] = sorted(
+                existing["fixes"], key=lambda e: order.get(e["type"], 99)
+            )
+        else:
+            updates.insert(0, {
+                "date": today,
+                "fixes": sorted_entries,
+            })
+
+        save_updates(updates)
+
+        for child in self.children:
+            child.disabled = True
+        await interaction.response.edit_message(content="✅ Update posted!", view=self)
+
+        embed = discord.Embed(
+            title=f"🛠️ SkyHarvest Update — {today}",
+            color=discord.Color.from_str("#ec9206"),
+        )
+        lines = []
+        for e in sorted_entries:
+            emoji = {"New": "🟡", "Fix": "🟢", "Patch": "🟠"}.get(e["type"], "⚪")
+            lines.append(f"{emoji} **{e['type']}** — {e['text']}")
+        embed.description = "\n".join(lines)
+        embed.set_footer(text=f"Posted by {interaction.user.display_name}")
+
+        await interaction.channel.send(embed=embed)
+
+
+@tree.command(name="gameupdate", description="Post a SkyHarvest game update (admin only)")
+async def gameupdate_command(interaction: discord.Interaction):
+    if not interaction.user.guild_permissions.administrator:
+        return await interaction.response.send_message(
+            "❌ You don't have permission to use this.", ephemeral=True
+        )
+
+    view = UpdateBuilderView(author_id=interaction.user.id)
+    await interaction.response.send_message(
+        content="**No entries yet.** Add some updates below.",
+        view=view,
+        ephemeral=True,
+    )
+
+
+# ======================
+# HTTP SERVER FOR ROBLOX
+# ======================
+
+async def handle_updates(request):
+    updates = load_updates()
+    return web.json_response(updates)
+
+async def start_http_server():
+    app = web.Application()
+    app.router.add_get("/updates", handle_updates)
+    runner = web.AppRunner(app)
+    await runner.setup()
+    site = web.TCPSite(runner, "0.0.0.0", 8080)
+    await site.start()
+    print("HTTP server running on port 8080")
+
 
 # ======================
 # MUSIC SYSTEM
 # ======================
-# /play     — Spotify playlist URL or song name
-# /skip     — skip current song
-# /previous — go back to previous song
-# /stop     — stop and disconnect
-#
-# Uses Lavalink (free public node) for YouTube streaming.
-# Spotify playlists are resolved via Spotify API then searched on YouTube.
 
-# Track history per guild for /previous
 music_history: dict[int, list[wavelink.Playable]] = {}
 
 def get_history(guild_id: int) -> list:
@@ -686,7 +803,6 @@ def get_history(guild_id: int) -> list:
 
 
 async def get_spotify_tracks(playlist_url: str) -> list[str]:
-    """Extract track search strings from a Spotify playlist URL."""
     loop = asyncio.get_event_loop()
     try:
         playlist_id = playlist_url.split("/playlist/")[-1].split("?")[0]
@@ -717,7 +833,6 @@ async def get_spotify_tracks(playlist_url: str) -> list[str]:
 
 @bot.event
 async def on_wavelink_track_start(payload: wavelink.TrackStartEventPayload):
-    """Called when a track starts playing — log to history."""
     player = payload.player
     if player and player.guild:
         hist = get_history(player.guild.id)
@@ -726,7 +841,6 @@ async def on_wavelink_track_start(payload: wavelink.TrackStartEventPayload):
 
 @bot.event
 async def on_wavelink_track_end(payload: wavelink.TrackEndEventPayload):
-    """Called when a track ends — play next if queue has items."""
     player = payload.player
     if not player:
         return
@@ -751,7 +865,6 @@ async def play_command(interaction: discord.Interaction, query: str):
     guild = interaction.guild
     voice_channel = interaction.user.voice.channel
 
-    # Get or create wavelink player
     player = typing.cast(wavelink.Player, guild.voice_client)
     if player is None:
         try:
@@ -760,18 +873,21 @@ async def play_command(interaction: discord.Interaction, query: str):
                 timeout=20.0
             )
         except asyncio.TimeoutError:
-            return await interaction.followup.send("❌ Timed out connecting to voice channel. Try again.")
+            return await interaction.followup.send(
+                "❌ Timed out connecting to voice channel. Try again."
+            )
         except Exception as e:
             return await interaction.followup.send(f"❌ Failed to join voice channel: {e}")
     elif player.channel != voice_channel:
         await player.move_to(voice_channel)
 
-    # Spotify playlist
     if "spotify.com/playlist" in query:
         await interaction.followup.send("🔍 Fetching Spotify playlist...")
         track_names = await get_spotify_tracks(query)
         if not track_names:
-            return await interaction.followup.send("❌ Couldn't load that playlist. Make sure it's public.")
+            return await interaction.followup.send(
+                "❌ Couldn't load that playlist. Make sure it's public."
+            )
 
         await interaction.followup.send(f"⏳ Searching **{len(track_names)}** tracks...")
 
@@ -787,13 +903,11 @@ async def play_command(interaction: discord.Interaction, query: str):
 
         await interaction.followup.send(f"✅ Added **{loaded}** tracks to the queue.")
 
-        # Start playing if not already
         if not player.playing and not player.queue.is_empty:
             track = player.queue.get()
             await player.play(track)
 
     else:
-        # Single song search
         try:
             results = await wavelink.Playable.search(query)
         except Exception as e:
@@ -838,7 +952,6 @@ async def previous_command(interaction: discord.Interaction):
             "❌ No previous song.", ephemeral=True
         )
 
-    # Go back two (current is last in history)
     prev = hist[-2]
     music_history[guild.id] = hist[:-2]
     await player.play(prev)
@@ -859,6 +972,7 @@ async def stop_command(interaction: discord.Interaction):
     await player.stop()
     await player.disconnect()
     await interaction.response.send_message("⏹️ Stopped and disconnected.")
+
 
 # ======================
 # GLOBAL ERROR HANDLER
@@ -888,11 +1002,10 @@ async def on_ready():
         status=discord.Status.online,
         activity=discord.Game(name="Priority One"),
     )
-    # Re-register persistent views so buttons work after restarts
     bot.add_view(TicketActionView())
     await restore_ticket_panels(bot)
+    await start_http_server()
 
-    # Connect to Lavalink nodes (must be created inside async context)
     try:
         nodes = [wavelink.Node(uri=c["uri"], password=c["password"]) for c in LAVALINK_NODE_CONFIGS]
         await wavelink.Pool.connect(nodes=nodes, client=bot)
@@ -905,7 +1018,6 @@ async def on_ready():
         synced = await tree.sync()
         print(f"Synced {len(synced)} slash command(s) globally")
     except Exception as e:
-        import traceback
         traceback.print_exc()
         print(f"Failed to sync commands: {e}")
     print(f"Logged in as {bot.user}")
