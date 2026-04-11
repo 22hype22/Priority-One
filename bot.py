@@ -710,12 +710,12 @@ class UpdateBuilderView(discord.ui.View):
             return False
         return True
 
-    @discord.ui.button(label="+ New", style=discord.ButtonStyle.success, row=0)
+    @discord.ui.button(label="+ New", style=discord.ButtonStyle.secondary, row=0)
     async def add_new(self, interaction: discord.Interaction, button: discord.ui.Button):
         modal = UpdateEntryModal("New", self.entries, self)
         await interaction.response.send_modal(modal)
 
-    @discord.ui.button(label="+ Fix", style=discord.ButtonStyle.danger, row=0)
+    @discord.ui.button(label="+ Fix", style=discord.ButtonStyle.secondary, row=0)
     async def add_fix(self, interaction: discord.Interaction, button: discord.ui.Button):
         modal = UpdateEntryModal("Fix", self.entries, self)
         await interaction.response.send_modal(modal)
@@ -725,7 +725,7 @@ class UpdateBuilderView(discord.ui.View):
         modal = UpdateEntryModal("Patch", self.entries, self)
         await interaction.response.send_modal(modal)
 
-    @discord.ui.button(label="↩ Undo Last", style=discord.ButtonStyle.secondary, row=1)
+    @discord.ui.button(label="↩ Undo Last", style=discord.ButtonStyle.danger, row=1)
     async def undo_last(self, interaction: discord.Interaction, button: discord.ui.Button):
         if self.entries:
             self.entries.pop()
@@ -734,7 +734,7 @@ class UpdateBuilderView(discord.ui.View):
             view=self,
         )
 
-    @discord.ui.button(label="✅ Post Update", style=discord.ButtonStyle.primary, row=1)
+    @discord.ui.button(label="✅ Post Update", style=discord.ButtonStyle.success, row=1)
     async def post_update(self, interaction: discord.Interaction, button: discord.ui.Button):
         if not self.entries:
             return await interaction.response.send_message(
@@ -771,8 +771,7 @@ class UpdateBuilderView(discord.ui.View):
         )
         lines = []
         for e in sorted_entries:
-            emoji = {"New": "🟡", "Fix": "🟢", "Patch": "🟠"}.get(e["type"], "⚪")
-            lines.append(f"{emoji} **{e['type']}** — {e['text']}")
+            lines.append(f"- `{e['type'].upper()}` | {e['text']}")
         embed.description = "\n".join(lines)
         embed.set_footer(text=f"Posted by {interaction.user.display_name}")
 
