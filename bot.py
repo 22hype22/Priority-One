@@ -757,57 +757,19 @@ class UpdateBuilderView(discord.ui.View):
         await interaction.channel.send(embed=embed)
 
 
-class UpdateTypeChoice(str, discord.Enum):
-    new   = "New"
-    fix   = "Fix"
-    patch = "Patch"
-
 @tree.command(name="gameupdate", description="Post a SkyHarvest game update (admin only)")
-@app_commands.describe(
-    type="Type of update",
-    text="Description of the update",
-)
-async def gameupdate_command(
-    interaction: discord.Interaction,
-    type: UpdateTypeChoice,
-    text: str,
-):
+async def gameupdate_command(interaction: discord.Interaction):
     if not interaction.user.guild_permissions.administrator:
         return await interaction.response.send_message(
             "❌ You don't have permission to use this.", ephemeral=True
         )
 
-    order = {"New": 0, "Fix": 1, "Patch": 2}
-    today = datetime.date.today().strftime("%B %-d, %Y")
-
-    updates = load_updates()
-    existing = next((u for u in updates if u["date"] == today), None)
-    if existing:
-        existing["fixes"].append({"type": type.value, "text": text})
-        existing["fixes"] = sorted(
-            existing["fixes"], key=lambda e: order.get(e["type"], 99)
-        )
-    else:
-        updates.insert(0, {
-            "date": today,
-            "fixes": [{"type": type.value, "text": text}],
-        })
-
-    save_updates(updates)
-
-    updates = load_updates()
-    update_number = sum(len(g["fixes"]) for g in updates)
-    todays = next((u for u in updates if u["date"] == today), None)
-    all_fixes = todays["fixes"] if todays else []
-
-    lines = []
-    for e in all_fixes:
-        tag = f"`{e['type'].upper()}`"
-        lines.append(f"- {tag} | {e['text']}")
-
-    message = f"**DEVELOPMENT UPDATE | {update_number}**\n" + "\n".join(lines)
-
-    await interaction.response.send_message(message)
+    view = UpdateBuilderView(author_id=interaction.user.id)
+    await interaction.response.send_message(
+        content="**No entries yet.** Use the buttons below to add updates.",
+        view=view,
+        ephemeral=True,
+    )
 
 
 # ======================
