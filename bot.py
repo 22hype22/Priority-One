@@ -763,13 +763,51 @@ async def gameupdate_command(interaction: discord.Interaction):
         return await interaction.response.send_message(
             "❌ You don't have permission to use this.", ephemeral=True
         )
-
     view = UpdateBuilderView(author_id=interaction.user.id)
     await interaction.response.send_message(
         content="**No entries yet.** Use the buttons below to add updates.",
         view=view,
         ephemeral=True,
     )
+
+
+@tree.command(name="clearupdate", description="Remove a specific update entry from the game (admin only)")
+@app_commands.describe(
+    date="The date of the update e.g. April 11, 2026",
+    text="The exact text of the entry to remove",
+)
+async def clearupdate_command(
+    interaction: discord.Interaction,
+    date: str,
+    text: str,
+):
+    if not interaction.user.guild_permissions.administrator:
+        return await interaction.response.send_message(
+            "❌ You don't have permission to use this.", ephemeral=True
+        )
+
+    updates = load_updates()
+    found = False
+
+    for group in updates:
+        if group["date"].lower() == date.lower():
+            before = len(group["fixes"])
+            group["fixes"] = [f for f in group["fixes"] if f["text"].lower() != text.lower()]
+            if len(group["fixes"]) < before:
+                found = True
+            break
+
+    updates = [g for g in updates if g["fixes"]]
+    save_updates(updates)
+
+    if found:
+        await interaction.response.send_message(
+            f"✅ Removed entry from **{date}**. It will no longer show in game.", ephemeral=True
+        )
+    else:
+        await interaction.response.send_message(
+            "❌ Couldn't find that entry. Check the date and text match exactly.", ephemeral=True
+        )
 
 
 # ======================
