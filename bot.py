@@ -96,7 +96,7 @@ async def load_updates_async():
                 content = data["files"]["game_updates.json"]["content"]
                 return json.loads(content)
     except Exception as e:
-        print(f"Failed to load updates: {e}")
+        print(f"[spotify] Error: {type(e).__name__}: {e}")
         return []
 
 async def save_updates_async(data):
@@ -866,6 +866,7 @@ async def get_spotify_tracks(playlist_url: str) -> list[str]:
     loop = asyncio.get_event_loop()
     try:
         playlist_id = playlist_url.split("/playlist/")[-1].split("?")[0]
+        print(f"[spotify] Loading playlist ID: {playlist_id}")
         tracks = []
         offset = 0
         while True:
