@@ -52,9 +52,12 @@ GITHUB_TOKEN = os.getenv("GITHUB_TOKEN")
 GIST_ID = os.getenv("GIST_ID")
 
 def get_spotify_client():
+    cid = os.getenv("SPOTIFY_CLIENT_ID")
+    secret = os.getenv("SPOTIFY_CLIENT_SECRET")
+    print(f"[spotify] Using client_id: {cid[:8]}... secret: {secret[:8]}...")
     return spotipy.Spotify(auth_manager=SpotifyClientCredentials(
-        client_id=os.getenv("SPOTIFY_CLIENT_ID"),
-        client_secret=os.getenv("SPOTIFY_CLIENT_SECRET"),
+        client_id=cid,
+        client_secret=secret,
     ))
 
 LAVALINK_NODE_CONFIGS = [
