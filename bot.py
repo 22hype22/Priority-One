@@ -58,8 +58,8 @@ def get_spotify_client():
     ))
 
 LAVALINK_NODE_CONFIGS = [
+    {"uri": "http://lavalink.jirayu.net:13592", "password": "youshallnotpass"},
     {"uri": "https://lavalinkv4.serenetia.com", "password": "https://seretia.link/discord"},
-    {"uri": "https://lavalink.jirayu.net", "password": "youshallnotpass"},
 ]
 
 intents = discord.Intents.default()
@@ -892,6 +892,13 @@ async def get_spotify_tracks(playlist_url: str) -> list[str]:
         print(f"Spotify error: {e}")
         return []
 
+@bot.event
+async def on_wavelink_node_ready(payload: wavelink.NodeReadyEventPayload):
+    print(f"Lavalink node ready: {payload.node.identifier}")
+
+@bot.event
+async def on_wavelink_inactive_player(player: wavelink.Player):
+    await player.disconnect()
 
 @bot.event
 async def on_wavelink_track_start(payload: wavelink.TrackStartEventPayload):
@@ -932,6 +939,9 @@ async def play_command(interaction: discord.Interaction, query: str):
     player = typing.cast(wavelink.Player, guild.voice_client)
     if player is None:
         try:
+            # Check nodes are available
+            if not wavelink.Pool.nodes:
+                return await interaction.followup.send("❌ Music server is offline. Try again in a moment.")
             player = await asyncio.wait_for(
                 voice_channel.connect(cls=wavelink.Player),
                 timeout=20.0
