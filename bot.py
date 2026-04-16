@@ -57,7 +57,8 @@ sp = spotipy.Spotify(auth_manager=SpotifyClientCredentials(
 ))
 
 LAVALINK_NODE_CONFIGS = [
-    {"uri": "http://lavalink.jirayu.net:13592", "password": "youshallnotpass"},
+    {"uri": "https://lavalinkv4.serenetia.com", "password": "https://seretia.link/discord"},
+    {"uri": "https://lavalink.jirayu.net", "password": "youshallnotpass"},
 ]
 
 intents = discord.Intents.default()
@@ -903,12 +904,14 @@ async def on_wavelink_track_end(payload: wavelink.TrackEndEventPayload):
     player = payload.player
     if not player:
         return
-    if player.queue.is_empty:
-        await asyncio.sleep(1)
-        await player.disconnect()
-    else:
-        next_track = player.queue.get()
-        await player.play(next_track)
+    if payload.reason == "finished":
+        if player.queue.is_empty:
+            await asyncio.sleep(1)
+            if not player.playing:
+                await player.disconnect()
+        else:
+            next_track = player.queue.get()
+            await player.play(next_track)
 
 
 @tree.command(name="play", description="Play a Spotify playlist or search for a song")
