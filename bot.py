@@ -911,7 +911,7 @@ async def on_wavelink_track_start(payload: wavelink.TrackStartEventPayload):
         hist.append(payload.track)
         # Set voice channel status to current song
         track = payload.track
-        status = f"🎵 {track.title}"
+        status = f"{track.title}"
         if track.author:
             status += f" — {track.author}"
         try:
