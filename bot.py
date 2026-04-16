@@ -909,6 +909,16 @@ async def on_wavelink_track_start(payload: wavelink.TrackStartEventPayload):
     if player and player.guild:
         hist = get_history(player.guild.id)
         hist.append(payload.track)
+        # Set voice channel status to current song
+        track = payload.track
+        status = f"🎵 {track.title}"
+        if track.author:
+            status += f" — {track.author}"
+        try:
+            channel = player.channel
+            await channel.edit(status=status)
+        except Exception as e:
+            print(f"[music] Failed to set channel status: {e}")
 
 
 @bot.event
@@ -1043,6 +1053,12 @@ async def stop_command(interaction: discord.Interaction):
         return await interaction.response.send_message(
             "❌ Not in a voice channel.", ephemeral=True
         )
+
+    # Clear channel status
+    try:
+        await player.channel.edit(status=None)
+    except Exception:
+        pass
 
     music_history[interaction.guild.id] = []
     player.queue.clear()
