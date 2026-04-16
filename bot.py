@@ -51,10 +51,11 @@ TICKET_STAFF_ROLE_ID = 1126332043517767690
 GITHUB_TOKEN = os.getenv("GITHUB_TOKEN")
 GIST_ID = os.getenv("GIST_ID")
 
-sp = spotipy.Spotify(auth_manager=SpotifyClientCredentials(
-    client_id=os.getenv("SPOTIFY_CLIENT_ID"),
-    client_secret=os.getenv("SPOTIFY_CLIENT_SECRET"),
-))
+def get_spotify_client():
+    return spotipy.Spotify(auth_manager=SpotifyClientCredentials(
+        client_id=os.getenv("SPOTIFY_CLIENT_ID"),
+        client_secret=os.getenv("SPOTIFY_CLIENT_SECRET"),
+    ))
 
 LAVALINK_NODE_CONFIGS = [
     {"uri": "https://lavalinkv4.serenetia.com", "password": "https://seretia.link/discord"},
@@ -872,7 +873,7 @@ async def get_spotify_tracks(playlist_url: str) -> list[str]:
         while True:
             results = await loop.run_in_executor(
                 None,
-                lambda o=offset: sp.playlist_tracks(playlist_id, offset=o, limit=50)
+                lambda o=offset: get_spotify_client().playlist_tracks(playlist_id, offset=o, limit=50)
             )
             items = results.get("items", [])
             if not items:
