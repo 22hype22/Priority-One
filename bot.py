@@ -1059,7 +1059,7 @@ async def on_command_error(ctx, error):
 async def on_ready():
     await bot.change_presence(
         status=discord.Status.online,
-        activity=discord.Game(name="Oversite"),
+        activity=discord.Game(name="Keeping an eye on Oversites Community"),
     )
     bot.add_view(TicketActionView())
     await restore_ticket_panels(bot)
